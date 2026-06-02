@@ -72,6 +72,56 @@ local function wire_buffers(cfg)
   end
 end
 
+--- Generate a default `m1-tools.toml` in the project root by running the
+--- server's `--scaffold-config` (so the file matches the installed tool
+--- versions and never drifts), then open it. The same config the m1-vscode
+--- "Generate m1-tools.toml" command produces — shared via the server.
+---@param cfg NvimM1Config
+local function generate_config(cfg)
+  local bin = lsp.resolve_cmd(cfg)
+  if not bin then
+    vim.notify("nvim-m1: m1-lsp not found (set opts.server_path)", vim.log.levels.ERROR)
+    return
+  end
+  -- Place it at the M1 project root (nearest Project.m1prj above the buffer),
+  -- else the current working directory.
+  local cur = vim.api.nvim_buf_get_name(0)
+  local start = (cur ~= "" and vim.fs.dirname(cur)) or vim.fn.getcwd()
+  local marker = vim.fs.find({ "Project.m1prj" }, { path = start, upward = true })[1]
+  local root = marker and vim.fs.dirname(marker) or vim.fn.getcwd()
+  local target = root .. "/m1-tools.toml"
+
+  if vim.fn.filereadable(target) == 1 then
+    local answer = vim.fn.confirm(
+      "m1-tools.toml already exists. Overwrite with defaults?",
+      "&Yes\n&No",
+      2
+    )
+    if answer ~= 1 then
+      return
+    end
+  end
+
+  local out = vim.fn.system({ bin, "--scaffold-config" })
+  if vim.v.shell_error ~= 0 then
+    vim.notify("nvim-m1: --scaffold-config failed: " .. out, vim.log.levels.ERROR)
+    return
+  end
+
+  local fh, err = io.open(target, "w")
+  if not fh then
+    vim.notify(
+      "nvim-m1: cannot write " .. target .. ": " .. (err or "?"),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+  fh:write(out)
+  fh:close()
+  vim.cmd("edit " .. vim.fn.fnameescape(target))
+  vim.notify("nvim-m1: generated " .. target)
+end
+
 --- Convenience user commands and keymaps.
 local function user_commands()
   vim.api.nvim_create_user_command("M1Format", function()
@@ -88,6 +138,12 @@ local function user_commands()
   vim.api.nvim_create_user_command("M1Lint", function()
     lint.lint(0)
   end, { desc = "nvim-m1: lint the current buffer" })
+
+  vim.api.nvim_create_user_command("M1GenerateConfig", function()
+    generate_config(M.config or config.defaults)
+  end, {
+    desc = "nvim-m1: write a default m1-tools.toml to the project root",
+  })
 end
 
 --- Configure M1 script support. Idempotent.

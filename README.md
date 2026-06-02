@@ -52,7 +52,17 @@ present and otherwise a built-in runner — so both work with zero optional depe
 | `root_markers` | `{ "Project.m1prj", ".git" }` | Files marking a project root. |
 | `auto_install_parser` | `true` | Run `:TSInstall m1` if the parser is missing. |
 | `lint_on_insert_leave` | `false` | Also lint on `InsertLeave`. |
-| `capabilities` / `on_attach` / `settings` | — | Forwarded to the LSP client. |
+| `capabilities` / `on_attach` | — | Forwarded to the LSP client. |
+| `settings` | `{}` | Unified m1-lsp config (lint/format/diagnostics), e.g. `{ lint = { max_line_length = 100 }, diagnostics = { ignore = { "T041" } } }`. A workspace `m1-tools.toml` overrides it. |
+
+### Configuration
+
+`settings` is the convenient per-setup config. For **project-level** config shared
+with teammates (and the VS Code extension), commit an `m1-tools.toml` to the project
+root — the server discovers and applies it, **overriding** `settings`. It configures
+the same lint thresholds, formatter options, and cross-source diagnostic
+`ignore`/`select` (any lint `L*` or typecheck `T*` code). Generate one pre-filled
+with all defaults via `:M1GenerateConfig`.
 
 ### Commands
 
@@ -61,6 +71,7 @@ present and otherwise a built-in runner — so both work with zero optional depe
 | `:M1Format` | Format the current buffer now. |
 | `:M1FormatToggle` | Toggle format-on-save for this session. |
 | `:M1Lint` | Lint the current buffer now. |
+| `:M1GenerateConfig` | Write a default `m1-tools.toml` to the project root. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
 ## Features

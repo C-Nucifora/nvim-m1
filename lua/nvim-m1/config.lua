@@ -16,7 +16,10 @@ local M = {}
 ---@field lsp boolean                Register + enable m1-lsp (default: true).
 ---@field capabilities? table        LSP client capabilities (default: blink.cmp's if present, else stock).
 ---@field on_attach? fun(client:vim.lsp.Client, bufnr:integer)  Extra per-buffer LSP setup.
----@field settings? table            Server settings forwarded to m1-lsp.
+---@field settings? table            Unified m1-lsp config forwarded to the server (lint/format/
+---                                   diagnostics), e.g. `{ lint = { max_line_length = 100 },
+---                                   diagnostics = { ignore = { "T041" } } }`. A workspace
+---                                   `m1-tools.toml` overrides these. See :M1GenerateConfig.
 ---@field format_on_save boolean     Format .m1scr buffers on write (default: true).
 ---@field format_timeout_ms integer  Format timeout (default: 5000).
 ---@field lint_on_save boolean       Lint .m1scr buffers on write (default: true).
