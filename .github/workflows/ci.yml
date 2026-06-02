@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+# CI only reads the repo (and downloads public release assets); no writes needed.
+permissions:
+  contents: read
+
 jobs:
   stylua:
     name: Lua Format
