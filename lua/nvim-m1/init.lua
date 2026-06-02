@@ -1,92 +1,115 @@
---- nvim-m1: single-call setup for M1 script support in Neovim.
---- Wires nvim-treesitter, nvim-lspconfig, conform.nvim, and nvim-lint.
+--- nvim-m1: single-call setup for M1 script (`.m1scr`) support in Neovim.
+---
+--- Wires tree-sitter highlighting, the m1-lsp language server, format-on-save
+--- (m1-fmt) and standalone linting (m1-lint) — the Neovim equivalent of
+--- m1-vscode. Optional integrations (conform.nvim, nvim-lint, blink.cmp) are
+--- used when present and degrade gracefully when absent.
+---
+---     require("nvim-m1").setup()
+---
+local config = require("nvim-m1.config")
+local treesitter = require("nvim-m1.treesitter")
+local lsp = require("nvim-m1.lsp")
+local format = require("nvim-m1.format")
+local lint = require("nvim-m1.lint")
+
 local M = {}
 
----@class NvimM1Opts
----@field server_path? string  Path to m1-lsp binary (default: $PATH / bundled)
----@field format_on_save? boolean  Enable format-on-save via conform.nvim (default: true)
----@field lint_on_save? boolean  Enable lint-on-save via nvim-lint (default: true)
+--- The resolved configuration from the last setup() call.
+---@type NvimM1Config?
+M.config = nil
 
-local defaults = {
-  server_path  = nil,
-  format_on_save = true,
-  lint_on_save   = true,
-}
-
---- Register the m1 tree-sitter grammar with nvim-treesitter.
-local function setup_treesitter()
-  local ok, parsers = pcall(require, "nvim-treesitter.parsers")
-  if not ok then return end
-  local cfg = parsers.get_parser_configs()
-  if cfg.m1 then return end
-  cfg.m1 = {
-    install_info = {
-      url    = "https://github.com/C-Nucifora/tree-sitter-m1",
-      files  = { "src/parser.c", "src/scanner.c" },
-      branch = "main",
-    },
-    filetype = "m1scr",
-  }
-  -- TODO: trigger TSInstall if not installed
+--- Register the m1scr/m1prj filetypes. Safe to call repeatedly and before
+--- setup() (the ftdetect/ and plugin/ shims call it so `ft = "m1scr"` lazy
+--- triggers fire).
+function M.register_filetypes()
+  vim.filetype.add({ extension = { m1scr = "m1scr", m1prj = "m1prj" } })
 end
 
---- Register m1-lsp with nvim-lspconfig and start the server.
----@param opts NvimM1Opts
-local function setup_lsp(opts)
-  local ok_lsp, lspconfig = pcall(require, "lspconfig")
-  local ok_cfg, configs   = pcall(require, "lspconfig.configs")
-  if not ok_lsp or not ok_cfg then return end
-
-  if not configs.m1_lsp then
-    configs.m1_lsp = {
-      default_config = {
-        cmd              = { opts.server_path or "m1-lsp" },
-        filetypes        = { "m1scr" },
-        root_dir         = lspconfig.util.root_pattern("Project.m1prj", ".git"),
-        single_file_support = true,
-      },
-    }
+--- Start tree-sitter on the given buffer and remember it for FileType events.
+---@param cfg NvimM1Config
+local function wire_buffers(cfg)
+  if not cfg.treesitter then
+    return
   end
-  lspconfig.m1_lsp.setup({})
-end
+  local group = vim.api.nvim_create_augroup("NvimM1Buffer", { clear = true })
 
---- Wire m1-fmt into conform.nvim for format-on-save.
-local function setup_format()
-  local ok, conform = pcall(require, "conform")
-  if not ok then return end
-  conform.setup({
-    formatters_by_ft = { m1scr = { "m1_fmt" } },
-    formatters = {
-      m1_fmt = { command = "m1-fmt", args = { "--stdin-filepath", "$FILENAME" }, stdin = true },
-    },
-    format_on_save = { timeout_ms = 500, lsp_fallback = false },
+  vim.api.nvim_create_autocmd("FileType", {
+    group = group,
+    pattern = "m1scr",
+    desc = "nvim-m1: start tree-sitter",
+    callback = function(args)
+      treesitter.start(args.buf)
+    end,
   })
+
+  -- .m1prj is XML; give it basic XML highlighting (the LSP attaches for
+  -- rename-from-declaration, but publishes no diagnostics for it).
+  if cfg.attach_m1prj then
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      pattern = "m1prj",
+      desc = "nvim-m1: XML highlighting for the project file",
+      callback = function()
+        vim.bo.syntax = "xml"
+      end,
+    })
+  end
+
+  -- Buffers already open at setup() time (e.g. `nvim file.m1scr`) predate the
+  -- extension->filetype mapping, so re-trigger by filename.
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) then
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name:match("%.m1scr$") then
+        if vim.bo[buf].filetype ~= "m1scr" then
+          vim.bo[buf].filetype = "m1scr"
+        else
+          treesitter.start(buf)
+        end
+      end
+    end
+  end
 end
 
---- Wire m1-lint into nvim-lint for lint-on-save.
-local function setup_lint()
-  local ok, lint = pcall(require, "lint")
-  if not ok then return end
-  -- TODO: define m1-lint linter parser once m1-lint stabilises its output format
-  lint.linters_by_ft = lint.linters_by_ft or {}
-  lint.linters_by_ft.m1scr = { "m1_lint" }
-  vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost" }, {
-    pattern  = "*.m1scr",
-    callback = function() lint.try_lint() end,
-  })
+--- Convenience user commands and keymaps.
+local function user_commands()
+  vim.api.nvim_create_user_command("M1Format", function()
+    format.format(0, M.config or config.defaults)
+  end, { desc = "nvim-m1: format the current buffer" })
+
+  vim.api.nvim_create_user_command("M1FormatToggle", function()
+    vim.g.nvim_m1_format_on_save = not vim.g.nvim_m1_format_on_save
+    vim.notify(
+      "M1 format-on-save: " .. (vim.g.nvim_m1_format_on_save and "ON" or "OFF")
+    )
+  end, { desc = "nvim-m1: toggle format-on-save" })
+
+  vim.api.nvim_create_user_command("M1Lint", function()
+    lint.lint(0)
+  end, { desc = "nvim-m1: lint the current buffer" })
 end
 
----@param opts? NvimM1Opts
+--- Configure M1 script support. Idempotent.
+---@param opts? table  See |NvimM1Config|.
 function M.setup(opts)
-  opts = vim.tbl_deep_extend("force", defaults, opts or {})
+  local cfg = config.resolve(opts)
+  M.config = cfg
 
-  -- File type detection
-  vim.filetype.add({ extension = { m1scr = "m1scr" } })
+  M.register_filetypes()
+  treesitter.register(cfg)
+  wire_buffers(cfg)
 
-  setup_treesitter()
-  setup_lsp(opts)
-  if opts.format_on_save then setup_format() end
-  if opts.lint_on_save   then setup_lint()   end
+  if cfg.lsp then
+    lsp.setup(cfg)
+  end
+  -- Always register the format/lint backends so :M1Format and :M1Lint work; the
+  -- on-save autocmds are gated internally by cfg.format_on_save / lint_on_save.
+  format.setup(cfg)
+  lint.setup(cfg)
+
+  user_commands()
+  return M
 end
 
 return M

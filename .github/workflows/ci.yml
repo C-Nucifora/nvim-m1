@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  stylua:
+    name: Lua Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: JohnnyMorganz/stylua-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lua/ tests/
+
+  test:
+    name: Tests (Neovim ${{ matrix.neovim }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: [stable, nightly]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Check out plenary.nvim
+        uses: actions/checkout@v6
+        with:
+          repository: nvim-lua/plenary.nvim
+          path: deps/plenary.nvim
+
+      - name: Install m1 toolchain binaries (best-effort, enables e2e specs)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          for tool in m1-lint m1-fmt m1-lsp; do
+            gh release download --repo "C-Nucifora/$tool" \
+              --pattern "$tool-x86_64-unknown-linux-gnu" \
+              -O "$HOME/.local/bin/$tool" 2>/dev/null \
+              && chmod +x "$HOME/.local/bin/$tool" || true
+          done
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests
+        env:
+          PLENARY_PATH: ${{ github.workspace }}/deps/plenary.nvim
+        run: scripts/test.sh
