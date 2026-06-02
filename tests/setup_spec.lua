@@ -39,6 +39,7 @@ describe("nvim-m1.setup", function()
     assert.is_not_nil(cmds.M1Format)
     assert.is_not_nil(cmds.M1Lint)
     assert.is_not_nil(cmds.M1FormatToggle)
+    assert.is_not_nil(cmds.M1GenerateConfig)
   end)
 
   it("only wires format-on-save when enabled", function()

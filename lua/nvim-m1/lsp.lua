@@ -60,6 +60,12 @@ function M.setup(cfg)
     return false, "m1-lsp not found on $PATH (set opts.server_path)"
   end
 
+  -- Forward user settings (lint/format/diagnostics) to the server at `initialize`
+  -- too, not just via didChangeConfiguration — so they apply before the first
+  -- diagnostics publish. A workspace `m1-tools.toml`, which the server discovers
+  -- itself, overrides these (matching the m1-vscode precedence).
+  local init_options = cfg.settings and { settings = cfg.settings } or nil
+
   if has_native_api() then
     vim.lsp.config(M.client_name, {
       cmd = { bin },
@@ -68,6 +74,7 @@ function M.setup(cfg)
       capabilities = capabilities(cfg),
       on_attach = cfg.on_attach,
       settings = cfg.settings,
+      init_options = init_options,
     })
     vim.lsp.enable(M.client_name)
     return true
@@ -94,6 +101,7 @@ function M.setup(cfg)
     capabilities = capabilities(cfg),
     on_attach = cfg.on_attach,
     settings = cfg.settings,
+    init_options = init_options,
   })
   return true
 end
