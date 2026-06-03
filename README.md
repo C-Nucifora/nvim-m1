@@ -6,15 +6,19 @@ Neovim plugin for [M1 script](https://github.com/C-Nucifora/m1-tools) (`.m1scr`)
 
 - Neovim ≥ 0.10
 - [lazy.nvim](https://github.com/folke/lazy.nvim) (or any plugin manager)
-- [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter)
-- [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
+- [tree-sitter-m1](https://github.com/C-Nucifora/tree-sitter-m1) — the `m1` grammar + queries (a dependency, pulled in automatically)
+- A C compiler (`cc`/`gcc`/`clang`) on `$PATH` — the parser is compiled from tree-sitter-m1's sources on first setup
+- On Neovim 0.10: [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (0.11+ uses the native LSP API)
 - Optional: [conform.nvim](https://github.com/stevearc/conform.nvim), [nvim-lint](https://github.com/mfussenegger/nvim-lint)
 - The `m1-lsp`, `m1-fmt` and `m1-lint` binaries on `$PATH` (run `:checkhealth nvim-m1`)
 
-On Neovim 0.11+ the server is registered with the native `vim.lsp.config`/`vim.lsp.enable`
-API; on 0.10 it falls back to nvim-lspconfig. Format-on-save uses conform.nvim when
-present and otherwise falls back to LSP formatting; standalone lint uses nvim-lint when
-present and otherwise a built-in runner — so both work with zero optional dependencies.
+Tree-sitter highlighting works through Neovim core: nvim-m1 compiles the `m1` parser from
+tree-sitter-m1's sources into a site `parser/m1.so` and registers its queries directly, so
+it does **not** depend on a particular nvim-treesitter branch (the `main` rewrite dropped the
+runtime `:TSInstall`/`install_info` path nvim-m1 used to rely on). On Neovim 0.11+ the server
+is registered with the native `vim.lsp.config`/`vim.lsp.enable` API; on 0.10 it falls back to
+nvim-lspconfig. Format-on-save uses conform.nvim when present and otherwise falls back to LSP
+formatting; standalone lint uses nvim-lint when present and otherwise a built-in runner.
 
 ## Installation
 
@@ -23,8 +27,9 @@ present and otherwise a built-in runner — so both work with zero optional depe
 {
   "C-Nucifora/nvim-m1",
   dependencies = {
-    "nvim-treesitter/nvim-treesitter",
-    "neovim/nvim-lspconfig",
+    "C-Nucifora/tree-sitter-m1", -- the m1 grammar + queries (required)
+    { "nvim-treesitter/nvim-treesitter", optional = true },
+    { "neovim/nvim-lspconfig", optional = true }, -- only needed on Neovim 0.10
     { "stevearc/conform.nvim", optional = true },
     { "mfussenegger/nvim-lint", optional = true },
   },

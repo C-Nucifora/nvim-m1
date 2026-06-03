@@ -55,11 +55,20 @@ function M.check()
   end
 
   start("nvim-m1: tree-sitter")
+  local no_cc = vim.fn.exepath("cc") == ""
+    and vim.fn.exepath("gcc") == ""
+    and vim.fn.exepath("clang") == ""
   if require("nvim-m1.treesitter").parser_installed() then
     ok("`m1` parser installed")
+  elseif no_cc then
+    err("`m1` parser not built and no C compiler found", {
+      "nvim-m1 compiles the parser from tree-sitter-m1's sources on setup;",
+      "install a C compiler (cc/gcc/clang) on $PATH, then restart Neovim.",
+    })
   else
-    warn("`m1` parser not installed", {
-      "Run :TSInstall m1 (requires a C compiler).",
+    warn("`m1` parser not built", {
+      "Ensure C-Nucifora/tree-sitter-m1 is installed (it is a dependency);",
+      "nvim-m1 compiles the parser from its sources automatically on setup.",
     })
   end
 
