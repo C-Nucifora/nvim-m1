@@ -109,6 +109,7 @@ read-only and reloads automatically after an edit. Put `m1-project` on `$PATH`
 | Syntax highlighting | tree-sitter-m1 |
 | Diagnostics (syntax + lint + types) | m1-lsp |
 | Hover, completion, go-to-definition | m1-lsp |
+| Go-to-implementation (a channel's write/producer sites) | m1-lsp |
 | Find references, rename | m1-lsp |
 | Inlay type-hints | m1-lsp |
 | Semantic tokens | m1-lsp |
