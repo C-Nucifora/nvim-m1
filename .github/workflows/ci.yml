@@ -56,6 +56,12 @@ jobs:
               -O "$HOME/.local/bin/$tool" 2>/dev/null \
               && chmod +x "$HOME/.local/bin/$tool" || true
           done
+          # m1-project lives under nedlane/ — its e2e create-channel spec runs
+          # only when the binary is present (skips otherwise).
+          gh release download --repo "nedlane/m1-project" \
+            --pattern "m1-project-x86_64-unknown-linux-gnu" \
+            -O "$HOME/.local/bin/m1-project" 2>/dev/null \
+            && chmod +x "$HOME/.local/bin/m1-project" || true
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run tests
