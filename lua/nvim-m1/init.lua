@@ -12,6 +12,7 @@ local treesitter = require("nvim-m1.treesitter")
 local lsp = require("nvim-m1.lsp")
 local format = require("nvim-m1.format")
 local lint = require("nvim-m1.lint")
+local project = require("nvim-m1.project")
 
 local M = {}
 
@@ -144,6 +145,18 @@ local function user_commands()
   end, {
     desc = "nvim-m1: write a default m1-tools.toml to the project root",
   })
+
+  vim.api.nvim_create_user_command("M1CreateChannel", function()
+    project.create_channel(M.config or config.defaults)
+  end, { desc = "nvim-m1: create a channel in Project.m1prj (m1-project)" })
+
+  vim.api.nvim_create_user_command("M1SetSecurity", function()
+    project.set_security(M.config or config.defaults)
+  end, { desc = "nvim-m1: set a component's security level (m1-project)" })
+
+  vim.api.nvim_create_user_command("M1SetCallRate", function()
+    project.set_call_rate(M.config or config.defaults)
+  end, { desc = "nvim-m1: set a script's execution rate (m1-project)" })
 end
 
 --- Configure M1 script support. Idempotent.

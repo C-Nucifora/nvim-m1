@@ -11,7 +11,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 stack="$(cd "$here/.." && pwd)"
 
 # Built toolchain binaries (release, then debug) so e2e specs find m1-lint etc.
-for tool in m1-lint m1-fmt m1-lsp; do
+for tool in m1-lint m1-fmt m1-lsp m1-project; do
   for profile in release debug; do
     d="$stack/$tool/target/$profile"
     [ -x "$d/$tool" ] && PATH="$d:$PATH"

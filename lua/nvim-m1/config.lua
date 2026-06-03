@@ -40,6 +40,10 @@ M.defaults = {
   on_attach = nil,
   settings = {},
 
+  -- Path to the m1-project binary (Project.m1prj editor for :M1CreateChannel etc.).
+  -- nil = search $PATH for "m1-project".
+  project_path = nil,
+
   format_on_save = true,
   format_timeout_ms = 5000,
 
@@ -64,6 +68,7 @@ function M.resolve(opts)
     capabilities = { cfg.capabilities, "table", true },
     on_attach = { cfg.on_attach, "function", true },
     settings = { cfg.settings, "table" },
+    project_path = { cfg.project_path, "string", true },
     format_on_save = { cfg.format_on_save, "boolean" },
     format_timeout_ms = { cfg.format_timeout_ms, "number" },
     lint_on_save = { cfg.lint_on_save, "boolean" },
