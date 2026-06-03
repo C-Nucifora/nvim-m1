@@ -45,6 +45,7 @@ present and otherwise a built-in runner — so both work with zero optional depe
 | Key | Default | Description |
 | --- | --- | --- |
 | `server_path` | `nil` | Path to the m1-lsp binary; `nil` searches `$PATH`. |
+| `project_path` | `nil` | Path to the m1-project binary (Project.m1prj editor; powers `:M1CreateChannel` etc.); `nil` searches `$PATH`. |
 | `format_on_save` | `true` | Format `.m1scr` on write with m1-fmt. |
 | `lint_on_save` | `true` | Lint `.m1scr` on write with m1-lint. |
 | `filetypes` | `{ "m1scr" }` | Script filetypes to wire. |
@@ -72,7 +73,15 @@ with all defaults via `:M1GenerateConfig`.
 | `:M1FormatToggle` | Toggle format-on-save for this session. |
 | `:M1Lint` | Lint the current buffer now. |
 | `:M1GenerateConfig` | Write a default `m1-tools.toml` to the project root. |
+| `:M1CreateChannel` | Create a channel in `Project.m1prj` (prompts for name/type/unit/security). |
+| `:M1SetSecurity` | Set a component's security/access level. |
+| `:M1SetCallRate` | Set a script's execution rate (picked from the project's clocks). |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
+
+The last three edit `Project.m1prj` through the [`m1-project`](https://github.com/nedlane/m1-project)
+binary (the same tool the VS Code extension uses) — the language server stays
+read-only and reloads automatically after an edit. Put `m1-project` on `$PATH`
+(or set `project_path`); `:checkhealth nvim-m1` reports whether it's found.
 
 ## Features
 

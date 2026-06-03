@@ -45,6 +45,14 @@ function M.check()
       { "Install m1-lint on $PATH." }
     )
   end
+  local proj = require("nvim-m1.project").resolve_cmd(cfg)
+  if proj then
+    ok("m1-project: " .. proj .. " (:M1CreateChannel/SetSecurity/SetCallRate)")
+  else
+    warn("m1-project not found — project-editing commands unavailable", {
+      "Install m1-project on $PATH, or set opts.project_path.",
+    })
+  end
 
   start("nvim-m1: tree-sitter")
   if require("nvim-m1.treesitter").parser_installed() then
