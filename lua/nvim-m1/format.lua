@@ -9,9 +9,12 @@ local M = {}
 
 local GROUP = "NvimM1Format"
 
---- conform formatter definition for m1-fmt (stdin, filename-aware).
+--- conform formatter definition for m1-fmt (stdin, filename-aware). `command`
+--- resolves at format time to the bundled binary when m1-fmt isn't on $PATH.
 M.conform_formatter = {
-  command = "m1-fmt",
+  command = function()
+    return require("nvim-m1.install").resolve("m1-fmt") or "m1-fmt"
+  end,
   args = { "--stdin-filepath", "$FILENAME" },
   stdin = true,
 }
