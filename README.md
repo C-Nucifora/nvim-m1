@@ -46,7 +46,7 @@ formatting; standalone lint uses nvim-lint when present and otherwise a built-in
   build = function()
     require("nvim-m1.install").install()
   end,
-  ft = "m1scr",
+  ft = { "m1scr", "m1prj" },
   opts = {
     -- Path to the m1-lsp binary (default: search $PATH for "m1-lsp")
     server_path = nil,

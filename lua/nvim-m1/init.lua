@@ -57,8 +57,10 @@ local function wire_buffers(cfg)
     })
   end
 
-  -- Buffers already open at setup() time (e.g. `nvim file.m1scr`) predate the
-  -- extension->filetype mapping, so re-trigger by filename.
+  -- Buffers already open at setup() time predate this autocmd — including the
+  -- very buffer whose FileType event lazy-loaded the plugin (e.g. opening a
+  -- `Project.m1prj` directly with `ft = { "m1scr", "m1prj" }`). Re-apply by
+  -- filename so highlighting/XML start without needing a second file.
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(buf) then
       local name = vim.api.nvim_buf_get_name(buf)
@@ -68,6 +70,17 @@ local function wire_buffers(cfg)
         else
           treesitter.start(buf)
         end
+      elseif cfg.attach_m1prj and name:match("%.m1prj$") then
+        if vim.bo[buf].filetype ~= "m1prj" then
+          vim.bo[buf].filetype = "m1prj"
+        end
+        -- Defer so we win the race with Neovim's own FileType->syntax handler
+        -- for the buffer whose FileType event lazy-loaded the plugin.
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(buf) then
+            vim.bo[buf].syntax = "xml"
+          end
+        end)
       end
     end
   end

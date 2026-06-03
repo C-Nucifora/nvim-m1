@@ -15,7 +15,7 @@ M.conform_formatter = {
   command = function()
     return require("nvim-m1.install").resolve("m1-fmt") or "m1-fmt"
   end,
-  args = { "--stdin-filepath", "$FILENAME" },
+  args = { "--stdin-filename", "$FILENAME" },
   stdin = true,
 }
 
