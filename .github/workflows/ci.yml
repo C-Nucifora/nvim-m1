@@ -44,6 +44,16 @@ jobs:
           repository: nvim-lua/plenary.nvim
           path: deps/plenary.nvim
 
+      # The m1 grammar sources, so tests/parser_spec.lua can compile the parser
+      # and assert real highlighting — guarding the nvim-treesitter-main
+      # regression where the parser was never built. ubuntu-latest already ships
+      # a C compiler (cc/gcc), which the spec needs.
+      - name: Check out tree-sitter-m1
+        uses: actions/checkout@v6
+        with:
+          repository: C-Nucifora/tree-sitter-m1
+          path: deps/tree-sitter-m1
+
       - name: Install m1 toolchain binaries (best-effort, enables e2e specs)
         continue-on-error: true
         env:
@@ -67,4 +77,5 @@ jobs:
       - name: Run tests
         env:
           PLENARY_PATH: ${{ github.workspace }}/deps/plenary.nvim
+          TREE_SITTER_M1_PATH: ${{ github.workspace }}/deps/tree-sitter-m1
         run: scripts/test.sh

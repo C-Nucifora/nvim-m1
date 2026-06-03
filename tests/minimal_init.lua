@@ -21,5 +21,16 @@ if not add(plenary) then
   add(vim.fn.stdpath("data") .. "/lazy/plenary.nvim")
 end
 
+-- tree-sitter-m1 (the `m1` grammar + queries) on the rtp enables the parser
+-- integration spec (tests/parser_spec.lua); without it that spec is pending.
+-- Resolved from $TREE_SITTER_M1_PATH (set by CI / scripts/test.sh), the sibling
+-- checkout in the m1-tools layout, or the lazy data dir.
+local grammar = vim.env.TREE_SITTER_M1_PATH or ""
+if not add(grammar) then
+  if not add(vim.fn.fnamemodify(root, ":h") .. "/tree-sitter-m1") then
+    add(vim.fn.stdpath("data") .. "/lazy/tree-sitter-m1")
+  end
+end
+
 vim.cmd("runtime plugin/plenary.vim")
 require("plenary.busted")
