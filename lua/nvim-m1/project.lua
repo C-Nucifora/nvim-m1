@@ -6,17 +6,12 @@
 --- extension uses, so both editors behave identically.
 local M = {}
 
---- Resolve the m1-project executable: explicit `project_path`, then $PATH.
+--- Resolve the m1-project executable: explicit `project_path`, then $PATH, then
+--- the bundled binary (installed by `:M1Install` / the lazy `build` hook).
 ---@param cfg NvimM1Config
 ---@return string? bin
 function M.resolve_cmd(cfg)
-  if cfg.project_path and cfg.project_path ~= "" then
-    return cfg.project_path
-  end
-  if vim.fn.executable("m1-project") == 1 then
-    return "m1-project"
-  end
-  return nil
+  return require("nvim-m1.install").resolve("m1-project", cfg.project_path)
 end
 
 --- The nearest `Project.m1prj` above the current buffer (or cwd), or nil.

@@ -90,10 +90,10 @@ function M.parse(output, path)
   return items
 end
 
---- The nvim-lint linter definition for m1-lint.
+--- The nvim-lint linter definition for m1-lint (bundled binary when not on $PATH).
 function M.linter()
   return {
-    cmd = "m1-lint",
+    cmd = require("nvim-m1.install").resolve("m1-lint") or "m1-lint",
     stdin = false,
     args = { "--format", "json" },
     append_fname = true,
@@ -112,11 +112,12 @@ end
 function M.run_builtin(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local path = vim.api.nvim_buf_get_name(bufnr)
-  if path == "" or vim.fn.executable("m1-lint") ~= 1 then
+  local cmd = require("nvim-m1.install").resolve("m1-lint")
+  if path == "" or not cmd then
     return
   end
   vim.system(
-    { "m1-lint", "--format", "json", path },
+    { cmd, "--format", "json", path },
     { text = true },
     vim.schedule_wrap(function(res)
       if not vim.api.nvim_buf_is_valid(bufnr) then

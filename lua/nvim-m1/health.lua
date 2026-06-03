@@ -8,10 +8,6 @@ local warn = h.warn or h.report_warn
 local err = h.error or h.report_error
 local info = h.info or h.report_info
 
-local function exe(name)
-  return vim.fn.executable(name) == 1
-end
-
 function M.check()
   local nvim_m1 = require("nvim-m1")
   local cfg = nvim_m1.config or require("nvim-m1.config").defaults
@@ -29,29 +25,45 @@ function M.check()
     ok("m1-lsp: " .. server)
   else
     warn("m1-lsp not found", {
-      "Install m1-lsp and put it on $PATH, or set opts.server_path.",
+      "Run :M1Install to download the bundled toolchain, or set opts.server_path.",
     })
   end
-  if exe("m1-fmt") then
-    ok("m1-fmt: found (formatting)")
+
+  local install = require("nvim-m1.install")
+  local fmt = install.resolve("m1-fmt")
+  if fmt then
+    ok("m1-fmt: " .. fmt .. " (formatting)")
   else
-    warn("m1-fmt not found — formatting unavailable", { "Install m1-fmt on $PATH." })
+    warn("m1-fmt not found — formatting falls back to the LSP", {
+      "Run :M1Install to download the bundled toolchain.",
+    })
   end
-  if exe("m1-lint") then
-    ok("m1-lint: found (standalone lint)")
+  local lintbin = install.resolve("m1-lint")
+  if lintbin then
+    ok("m1-lint: " .. lintbin .. " (standalone lint)")
   else
-    warn(
-      "m1-lint not found — standalone lint unavailable",
-      { "Install m1-lint on $PATH." }
-    )
+    warn("m1-lint not found — standalone lint uses the LSP's diagnostics", {
+      "Run :M1Install to download the bundled toolchain.",
+    })
   end
   local proj = require("nvim-m1.project").resolve_cmd(cfg)
   if proj then
     ok("m1-project: " .. proj .. " (:M1CreateChannel/SetSecurity/SetCallRate)")
   else
     warn("m1-project not found — project-editing commands unavailable", {
-      "Install m1-project on $PATH, or set opts.project_path.",
+      "Run :M1Install to download the bundled toolchain, or set opts.project_path.",
     })
+  end
+
+  start("nvim-m1: bundled toolchain")
+  info("install dir: " .. install.bin_dir())
+  local triple, _, perr = install.platform()
+  if triple then
+    ok(
+      "platform: " .. triple .. " (pinned m1-lsp " .. install.versions["m1-lsp"] .. ")"
+    )
+  else
+    warn(perr or "unsupported platform for prebuilt binaries")
   end
 
   start("nvim-m1: tree-sitter")

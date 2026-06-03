@@ -10,17 +10,12 @@ local M = {}
 --- the name — keeping the Neovim integration in sync from one place.
 M.client_name = "m1lsp"
 
---- Resolve the m1-lsp executable: explicit override, then $PATH.
+--- Resolve the m1-lsp executable: explicit override, then $PATH, then the
+--- bundled binary (installed by `:M1Install` / the lazy `build` hook).
 ---@param cfg NvimM1Config
 ---@return string? bin  Absolute/relative command, or nil if nothing is executable.
 function M.resolve_cmd(cfg)
-  if cfg.server_path and cfg.server_path ~= "" then
-    return cfg.server_path
-  end
-  if vim.fn.executable("m1-lsp") == 1 then
-    return "m1-lsp"
-  end
-  return nil
+  return require("nvim-m1.install").resolve("m1-lsp", cfg.server_path)
 end
 
 --- Default client capabilities, enriched with blink.cmp's if it is installed.
