@@ -26,6 +26,13 @@ describe("nvim-m1.install", function()
     assert.is_truthy(p:find("nvim%-m1/bin/m1%-lsp"))
   end)
 
+  it(
+    "needs_resign() is true on macOS (codesign the download) and false elsewhere",
+    function()
+      assert.equals(vim.uv.os_uname().sysname == "Darwin", install.needs_resign())
+    end
+  )
+
   it("resolve() prefers an explicit override over $PATH and the bundle", function()
     assert.equals("/custom/m1-lsp", install.resolve("m1-lsp", "/custom/m1-lsp"))
   end)
