@@ -176,16 +176,16 @@ local function user_commands()
     function()
       require("nvim-m1.install").install()
     end,
-    { desc = "nvim-m1: download the bundled M1 toolchain (m1-lsp/fmt/lint/project)" }
+    { desc = "nvim-m1: build the bundled M1 toolchain from source (m1-lsp/fmt/lint/project)" }
   )
 
-  -- :M1Update is an alias — install always fetches the pinned versions.
+  -- :M1Update is an alias — install always builds the pinned versions.
   vim.api.nvim_create_user_command(
     "M1Update",
     function()
       require("nvim-m1.install").install()
     end,
-    { desc = "nvim-m1: re-download the bundled M1 toolchain at the pinned versions" }
+    { desc = "nvim-m1: rebuild the bundled M1 toolchain from source at the pinned versions" }
   )
 end
 
@@ -215,7 +215,7 @@ function M.setup(opts)
   if cfg.lsp and not lsp.resolve_cmd(cfg) then
     vim.schedule(function()
       vim.notify(
-        "nvim-m1: m1-lsp not found — run :M1Install to download the bundled toolchain "
+        "nvim-m1: m1-lsp not found — run :M1Install to build the bundled toolchain from source "
           .. "(or set opts.server_path). See :checkhealth nvim-m1.",
         vim.log.levels.WARN
       )

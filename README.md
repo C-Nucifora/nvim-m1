@@ -10,12 +10,15 @@ Neovim plugin for [M1 script](https://github.com/C-Nucifora/m1-tools) (`.m1scr`)
 - A C compiler (`cc`/`gcc`/`clang`) on `$PATH` — the parser is compiled from tree-sitter-m1's sources on first setup
 - On Neovim 0.10: [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (0.11+ uses the native LSP API)
 - Optional: [conform.nvim](https://github.com/stevearc/conform.nvim), [nvim-lint](https://github.com/mfussenegger/nvim-lint)
-- `curl` on `$PATH` — used once to download the bundled toolchain
+- A [Rust toolchain](https://rustup.rs) (`cargo`) on `$PATH` — the bundled toolchain is built from source
 
 **The M1 toolchain is bundled** — you don't install `m1-lsp`/`m1-fmt`/`m1-lint`/`m1-project`
-yourself. The lazy.nvim `build` hook below downloads the pinned, prebuilt binaries for your
-platform into `stdpath("data")/nvim-m1/bin` on install/update; `:M1Install` / `:M1Update` do it
-on demand. A binary you put on `$PATH` (or point to via `server_path`/`project_path`) still wins.
+yourself. The lazy.nvim `build` hook below compiles the pinned tool sources for your platform
+into `stdpath("data")/nvim-m1/bin` on install/update — the same way your other plugins build
+their native bits — using `cargo install` against each tool's pinned git tag; `:M1Install` /
+`:M1Update` do it on demand. (Building locally rather than downloading a release binary also
+sidesteps the macOS code-signing kill that ad-hoc-signed release assets hit on Apple Silicon.)
+A binary you put on `$PATH` (or point to via `server_path`/`project_path`) still wins.
 `m1-lsp` alone provides diagnostics, hover, completion, formatting and rename — it embeds
 m1-fmt/m1-lint/m1-typecheck — so the LSP is the only hard requirement; the rest enable the
 conform.nvim / nvim-lint / project-editing paths. Run `:checkhealth nvim-m1` to verify.
@@ -41,8 +44,8 @@ formatting; standalone lint uses nvim-lint when present and otherwise a built-in
     { "stevearc/conform.nvim", optional = true },
     { "mfussenegger/nvim-lint", optional = true },
   },
-  -- Downloads the bundled M1 toolchain (m1-lsp/fmt/lint/project) for your
-  -- platform on install + update. Same as running :M1Install.
+  -- Builds the bundled M1 toolchain (m1-lsp/fmt/lint/project) from source for
+  -- your platform on install + update (cargo required). Same as :M1Install.
   build = function()
     require("nvim-m1.install").install()
   end,
@@ -94,7 +97,7 @@ with all defaults via `:M1GenerateConfig`.
 | `:M1CreateChannel` | Create a channel in `Project.m1prj` (prompts for name/type/unit/security). |
 | `:M1SetSecurity` | Set a component's security/access level. |
 | `:M1SetCallRate` | Set a script's execution rate (picked from the project's clocks). |
-| `:M1Install` / `:M1Update` | Download the bundled M1 toolchain at the pinned versions. |
+| `:M1Install` / `:M1Update` | Build the bundled M1 toolchain from source at the pinned versions. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
 The last three edit `Project.m1prj` through the [`m1-project`](https://github.com/nedlane/m1-project)

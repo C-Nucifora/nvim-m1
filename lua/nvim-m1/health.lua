@@ -25,7 +25,7 @@ function M.check()
     ok("m1-lsp: " .. server)
   else
     warn("m1-lsp not found", {
-      "Run :M1Install to download the bundled toolchain, or set opts.server_path.",
+      "Run :M1Install to build the bundled toolchain from source, or set opts.server_path.",
     })
   end
 
@@ -35,7 +35,7 @@ function M.check()
     ok("m1-fmt: " .. fmt .. " (formatting)")
   else
     warn("m1-fmt not found — formatting falls back to the LSP", {
-      "Run :M1Install to download the bundled toolchain.",
+      "Run :M1Install to build the bundled toolchain from source.",
     })
   end
   local lintbin = install.resolve("m1-lint")
@@ -43,7 +43,7 @@ function M.check()
     ok("m1-lint: " .. lintbin .. " (standalone lint)")
   else
     warn("m1-lint not found — standalone lint uses the LSP's diagnostics", {
-      "Run :M1Install to download the bundled toolchain.",
+      "Run :M1Install to build the bundled toolchain from source.",
     })
   end
   local proj = require("nvim-m1.project").resolve_cmd(cfg)
@@ -51,19 +51,21 @@ function M.check()
     ok("m1-project: " .. proj .. " (:M1CreateChannel/SetSecurity/SetCallRate)")
   else
     warn("m1-project not found — project-editing commands unavailable", {
-      "Run :M1Install to download the bundled toolchain, or set opts.project_path.",
+      "Run :M1Install to build the bundled toolchain from source, or set opts.project_path.",
     })
   end
 
   start("nvim-m1: bundled toolchain")
   info("install dir: " .. install.bin_dir())
-  local triple, _, perr = install.platform()
-  if triple then
-    ok(
-      "platform: " .. triple .. " (pinned m1-lsp " .. install.versions["m1-lsp"] .. ")"
-    )
+  info("pinned m1-lsp " .. install.versions["m1-lsp"] .. " (built from source)")
+  local cargo = vim.fn.exepath("cargo")
+  if cargo ~= "" then
+    ok("cargo: " .. cargo .. " (builds the toolchain on :M1Install / the build hook)")
   else
-    warn(perr or "unsupported platform for prebuilt binaries")
+    warn("cargo not found — can't build the bundled toolchain", {
+      "Install the Rust toolchain (https://rustup.rs) so :M1Install can build",
+      "m1-lsp/fmt/lint/project from source, then run :M1Install.",
+    })
   end
 
   start("nvim-m1: tree-sitter")

@@ -26,6 +26,21 @@ describe("nvim-m1.install", function()
     assert.is_truthy(p:find("nvim%-m1/bin/m1%-lsp"))
   end)
 
+  it("bin_dir is the cargo --root's bin subdir", function()
+    assert.equals(install.root_dir() .. "/bin", install.bin_dir())
+  end)
+
+  it("git_url builds a clonable URL for every default tool", function()
+    for _, tool in ipairs(install.tools) do
+      local url = install.git_url(tool)
+      assert.equals(
+        "https://github.com/" .. install.repos[tool] .. ".git",
+        url
+      )
+    end
+    assert.is_nil(install.git_url("m1-nonexistent-tool-xyz"))
+  end)
+
   it("resolve() prefers an explicit override over $PATH and the bundle", function()
     assert.equals("/custom/m1-lsp", install.resolve("m1-lsp", "/custom/m1-lsp"))
   end)
