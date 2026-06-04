@@ -25,7 +25,7 @@ function M.check()
     ok("m1-lsp: " .. server)
   else
     warn("m1-lsp not found", {
-      "Run :M1Install to build the bundled toolchain from source, or set opts.server_path.",
+      "Run :M1Install to install the bundled toolchain, or set opts.server_path.",
     })
   end
 
@@ -35,7 +35,7 @@ function M.check()
     ok("m1-fmt: " .. fmt .. " (formatting)")
   else
     warn("m1-fmt not found — formatting falls back to the LSP", {
-      "Run :M1Install to build the bundled toolchain from source.",
+      "Run :M1Install to install the bundled toolchain.",
     })
   end
   local lintbin = install.resolve("m1-lint")
@@ -43,7 +43,7 @@ function M.check()
     ok("m1-lint: " .. lintbin .. " (standalone lint)")
   else
     warn("m1-lint not found — standalone lint uses the LSP's diagnostics", {
-      "Run :M1Install to build the bundled toolchain from source.",
+      "Run :M1Install to install the bundled toolchain.",
     })
   end
   local proj = require("nvim-m1.project").resolve_cmd(cfg)
@@ -51,21 +51,44 @@ function M.check()
     ok("m1-project: " .. proj .. " (:M1CreateChannel/SetSecurity/SetCallRate)")
   else
     warn("m1-project not found — project-editing commands unavailable", {
-      "Run :M1Install to build the bundled toolchain from source, or set opts.project_path.",
+      "Run :M1Install to install the bundled toolchain, or set opts.project_path.",
     })
   end
 
   start("nvim-m1: bundled toolchain")
   info("install dir: " .. install.bin_dir())
-  info("pinned m1-lsp " .. install.versions["m1-lsp"] .. " (built from source)")
-  local cargo = vim.fn.exepath("cargo")
-  if cargo ~= "" then
-    ok("cargo: " .. cargo .. " (builds the toolchain on :M1Install / the build hook)")
+  if install.from_source() then
+    info(
+      "macOS: pinned m1-lsp " .. install.versions["m1-lsp"] .. " (built from source)"
+    )
+    local cargo = vim.fn.exepath("cargo")
+    if cargo ~= "" then
+      ok("cargo: " .. cargo .. " (builds the toolchain on :M1Install / the build hook)")
+    else
+      warn("cargo not found — can't build the bundled toolchain", {
+        "macOS builds the toolchain from source (the prebuilt release binaries",
+        "are SIGKILLed by the code-signing check on Apple Silicon).",
+        "Install the Rust toolchain (https://rustup.rs), then run :M1Install.",
+      })
+    end
   else
-    warn("cargo not found — can't build the bundled toolchain", {
-      "Install the Rust toolchain (https://rustup.rs) so :M1Install can build",
-      "m1-lsp/fmt/lint/project from source, then run :M1Install.",
-    })
+    local triple, _, perr = install.platform()
+    if triple then
+      ok(
+        "platform: "
+          .. triple
+          .. " (pinned m1-lsp "
+          .. install.versions["m1-lsp"]
+          .. ")"
+      )
+    else
+      warn(perr or "unsupported platform for prebuilt binaries")
+    end
+    if vim.fn.exepath("curl") == "" then
+      warn("curl not found — can't download the bundled toolchain", {
+        "Install curl on $PATH, then run :M1Install.",
+      })
+    end
   end
 
   start("nvim-m1: tree-sitter")
