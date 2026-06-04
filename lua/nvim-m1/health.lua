@@ -65,6 +65,19 @@ function M.check()
   else
     warn(perr or "unsupported platform for prebuilt binaries")
   end
+  -- macOS: the downloaded binary is re-signed ad-hoc on install (the released
+  -- asset's signature is killed by AMFI on Apple Silicon); that needs codesign.
+  if install.needs_resign() then
+    if vim.fn.exepath("codesign") ~= "" then
+      ok("codesign present (re-signs the downloaded macOS binaries on install)")
+    else
+      warn("codesign not found — the downloaded macOS binaries will be killed", {
+        "codesign ships with the Xcode Command Line Tools:",
+        "  xcode-select --install",
+        "then run :M1Install.",
+      })
+    end
+  end
 
   start("nvim-m1: tree-sitter")
   local no_cc = vim.fn.exepath("cc") == ""

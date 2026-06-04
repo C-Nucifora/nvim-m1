@@ -11,10 +11,14 @@ Neovim plugin for [M1 script](https://github.com/C-Nucifora/m1-tools) (`.m1scr`)
 - On Neovim 0.10: [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (0.11+ uses the native LSP API)
 - Optional: [conform.nvim](https://github.com/stevearc/conform.nvim), [nvim-lint](https://github.com/mfussenegger/nvim-lint)
 - `curl` on `$PATH` — used once to download the bundled toolchain
+- macOS only: `codesign` (ships with the Xcode Command Line Tools, alongside the C compiler
+  above) — the downloaded binaries are re-signed ad-hoc on install so Apple Silicon's
+  code-signing check doesn't kill them
 
 **The M1 toolchain is bundled** — you don't install `m1-lsp`/`m1-fmt`/`m1-lint`/`m1-project`
 yourself. The lazy.nvim `build` hook below downloads the pinned, prebuilt binaries for your
-platform into `stdpath("data")/nvim-m1/bin` on install/update; `:M1Install` / `:M1Update` do it
+platform into `stdpath("data")/nvim-m1/bin` on install/update (re-signing them ad-hoc on
+macOS so they run); `:M1Install` / `:M1Update` do it
 on demand. A binary you put on `$PATH` (or point to via `server_path`/`project_path`) still wins.
 `m1-lsp` alone provides diagnostics, hover, completion, formatting and rename — it embeds
 m1-fmt/m1-lint/m1-typecheck — so the LSP is the only hard requirement; the rest enable the

@@ -6,6 +6,13 @@
 --- fall back to them. Run automatically via the lazy.nvim `build` hook (see the
 --- README) or on demand with `:M1Install` / `:M1Update`.
 ---
+--- On macOS the downloaded binary is re-signed ad-hoc after download: the
+--- released asset's signature does not validate on Apple Silicon, so AMFI kills
+--- it at exec (SIGKILL, "Code Signature Invalid") and the LSP never attaches; a
+--- fresh local `codesign --force --sign -` makes it run. `codesign` ships with
+--- the Xcode Command Line Tools — the same package as the C compiler nvim-m1
+--- already requires — so this adds no new prerequisite. (nvim-m1#15)
+---
 --- m1-lsp is the essential one — it serves diagnostics (lint + types), hover,
 --- completion, formatting and rename (it embeds m1-fmt/m1-lint/m1-typecheck).
 --- m1-project powers the `:M1*` project-editing commands; m1-fmt/m1-lint are
@@ -16,10 +23,10 @@ local M = {}
 --- an nvim-m1 release) to upgrade the bundled toolchain — the Neovim analogue of
 --- m1-vscode's `package.json` `serverVersion` pin.
 M.versions = {
-  ["m1-lsp"] = "v0.22.1",
-  ["m1-fmt"] = "v0.4.1",
-  ["m1-lint"] = "v0.5.1",
-  ["m1-project"] = "v0.1.0",
+  ["m1-lsp"] = "v0.22.3",
+  ["m1-fmt"] = "v0.4.3",
+  ["m1-lint"] = "v0.7.0",
+  ["m1-project"] = "v0.1.1",
 }
 
 --- The GitHub repo each tool's release binaries come from.
@@ -94,7 +101,40 @@ function M.resolve(tool, explicit)
   return nil
 end
 
---- Download one tool's pinned release binary into `bin_dir()`.
+--- Whether a downloaded binary must be re-signed to run (macOS). The released
+--- `aarch64-apple-darwin` asset's ad-hoc signature does not validate on user
+--- machines, so AMFI kills it at exec (SIGKILL, "Code Signature Invalid"); a
+--- fresh local ad-hoc re-sign fixes it. (nvim-m1#15)
+---@return boolean
+function M.needs_resign()
+  return vim.uv.os_uname().sysname == "Darwin"
+end
+
+--- Re-sign `path` ad-hoc on macOS so the freshly-downloaded binary runs. A no-op
+--- (returns ok) off macOS. `codesign` ships with the Xcode Command Line Tools —
+--- the same package that provides the C compiler nvim-m1 already needs.
+---@param path string
+---@return boolean ok, string? err
+local function resign(path)
+  if not M.needs_resign() then
+    return true
+  end
+  local codesign = vim.fn.exepath("codesign")
+  if codesign == "" then
+    return false,
+      "codesign not found — install the Xcode Command Line Tools "
+        .. "(xcode-select --install); the downloaded macOS binary is otherwise "
+        .. "killed by the code-signing check"
+  end
+  vim.fn.system({ codesign, "--force", "--sign", "-", path })
+  if vim.v.shell_error ~= 0 then
+    return false, "failed to re-sign " .. path .. " with codesign"
+  end
+  return true
+end
+
+--- Download one tool's pinned release binary into `bin_dir()` (re-signing it
+--- ad-hoc on macOS so it will run).
 ---@param tool string
 ---@return boolean ok, string? err
 local function fetch(tool)
@@ -128,6 +168,10 @@ local function fetch(tool)
   end
   if suffix == "" then
     vim.fn.system({ "chmod", "+x", dest })
+  end
+  local rok, rerr = resign(dest)
+  if not rok then
+    return false, rerr
   end
   return true
 end
