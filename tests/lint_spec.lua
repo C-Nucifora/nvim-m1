@@ -190,3 +190,46 @@ describe("nvim-m1.lint.lint (no double-publish, #25)", function()
     assert.is_false(ran, "standalone linter must defer to m1-lsp's diagnostics")
   end)
 end)
+
+describe("nvim-m1.lint.setup autocmd gating (#25)", function()
+  -- The runtime guard alone can't stop the BufReadPost hook: it fires before the
+  -- async LSP attach, so the standalone linter must not be *wired* at all when
+  -- m1-lsp will provide diagnostics.
+  local lsp = require("nvim-m1.lsp")
+  local saved_resolve
+
+  local function autocmds()
+    return vim.api.nvim_get_autocmds({ group = "NvimM1Lint" })
+  end
+
+  before_each(function()
+    saved_resolve = lsp.resolve_cmd
+  end)
+  after_each(function()
+    lsp.resolve_cmd = saved_resolve
+  end)
+
+  it("does NOT wire the save/read hook when m1-lsp will attach", function()
+    lsp.resolve_cmd = function()
+      return "/usr/bin/m1-lsp"
+    end
+    lint.setup({ lint_on_save = true, lsp = true })
+    assert.equals(0, #autocmds())
+  end)
+
+  it("wires the save/read hook when the LSP is disabled", function()
+    lsp.resolve_cmd = function()
+      return "/usr/bin/m1-lsp"
+    end
+    lint.setup({ lint_on_save = true, lsp = false })
+    assert.is_true(#autocmds() >= 1)
+  end)
+
+  it("wires the save/read hook as a fallback when m1-lsp is not found", function()
+    lsp.resolve_cmd = function()
+      return nil
+    end
+    lint.setup({ lint_on_save = true, lsp = true })
+    assert.is_true(#autocmds() >= 1)
+  end)
+end)
