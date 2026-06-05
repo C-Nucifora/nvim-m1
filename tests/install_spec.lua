@@ -123,4 +123,84 @@ describe("nvim-m1.install", function()
       assert.equals(vim.log.levels.WARN, notes[1].level)
     end)
   end)
+
+  describe("install manifest + staleness (#26)", function()
+    -- bin_dir() lives under XDG_DATA_HOME, which scripts/test.sh points at a
+    -- throwaway temp dir — so writing/creating files here is hermetic.
+    local saved_fetch, saved_notify
+
+    local function fake_binary(tool)
+      vim.fn.mkdir(install.bin_dir(), "p")
+      local p = install.tool_path(tool)
+      local f = assert(io.open(p, "w"))
+      f:write("#!/bin/sh\n")
+      f:close()
+      vim.fn.system({ "chmod", "+x", p })
+      return p
+    end
+
+    local function write_manifest(tbl)
+      vim.fn.mkdir(install.bin_dir(), "p")
+      local f = assert(io.open(install.manifest_path(), "w"))
+      f:write(vim.json.encode(tbl))
+      f:close()
+    end
+
+    before_each(function()
+      saved_fetch = install.fetch
+      saved_notify = vim.notify
+      vim.notify = function() end
+      vim.fn.delete(install.bin_dir(), "rf")
+    end)
+    after_each(function()
+      install.fetch = saved_fetch
+      vim.notify = saved_notify
+      vim.fn.delete(install.bin_dir(), "rf")
+    end)
+
+    it("install() records the versions it installed in a manifest", function()
+      install.fetch = function()
+        return true
+      end -- no network
+      install.install({ "m1-lint", "m1-project" })
+      local v = install.installed_versions()
+      assert.equals(install.versions["m1-lint"], v["m1-lint"])
+      assert.equals(install.versions["m1-project"], v["m1-project"])
+    end)
+
+    it("install() does not record a tool whose download failed", function()
+      install.fetch = function(tool)
+        return tool ~= "m1-lint", "boom"
+      end
+      install.install({ "m1-lint", "m1-project" })
+      local v = install.installed_versions()
+      assert.is_nil(v["m1-lint"])
+      assert.equals(install.versions["m1-project"], v["m1-project"])
+    end)
+
+    it("installed_versions() is empty when nothing has been installed", function()
+      assert.same({}, install.installed_versions())
+    end)
+
+    it("stale_tools() flags a bundled binary recorded below the pin", function()
+      fake_binary("m1-lint")
+      write_manifest({ ["m1-lint"] = "v0.0.1" })
+      assert.is_true(vim.tbl_contains(install.stale_tools(), "m1-lint"))
+    end)
+
+    it("stale_tools() flags a bundled binary with no manifest entry", function()
+      fake_binary("m1-lint")
+      assert.is_true(vim.tbl_contains(install.stale_tools(), "m1-lint"))
+    end)
+
+    it("stale_tools() does NOT flag a binary recorded at the pinned version", function()
+      fake_binary("m1-lint")
+      write_manifest({ ["m1-lint"] = install.versions["m1-lint"] })
+      assert.is_false(vim.tbl_contains(install.stale_tools(), "m1-lint"))
+    end)
+
+    it("stale_tools() ignores tools that are not bundled on disk", function()
+      assert.same({}, install.stale_tools())
+    end)
+  end)
 end)
