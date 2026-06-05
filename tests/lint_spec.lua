@@ -116,3 +116,77 @@ describe("nvim-m1.lint.parse", function()
     assert.same({}, lint.parse(vim.json.encode({ version = 2 })))
   end)
 end)
+
+describe("nvim-m1.lint.lsp_attached (defer to the server, #25)", function()
+  local client_name = require("nvim-m1.lsp").client_name
+  local saved_get_clients
+
+  before_each(function()
+    saved_get_clients = vim.lsp.get_clients
+  end)
+  after_each(function()
+    vim.lsp.get_clients = saved_get_clients
+  end)
+
+  it("is true when an m1lsp client is attached to the buffer", function()
+    vim.lsp.get_clients = function()
+      return { { name = client_name }, { name = "lua_ls" } }
+    end
+    assert.is_true(lint.lsp_attached(0))
+  end)
+
+  it("is false when only other servers are attached", function()
+    vim.lsp.get_clients = function()
+      return { { name = "lua_ls" } }
+    end
+    assert.is_false(lint.lsp_attached(0))
+  end)
+
+  it("is false when no client is attached", function()
+    vim.lsp.get_clients = function()
+      return {}
+    end
+    assert.is_false(lint.lsp_attached(0))
+  end)
+end)
+
+describe("nvim-m1.lint.lint (no double-publish, #25)", function()
+  local saved_get_clients, saved_system, saved_resolve
+  local install = require("nvim-m1.install")
+  local buf
+
+  before_each(function()
+    saved_get_clients = vim.lsp.get_clients
+    saved_system = vim.system
+    saved_resolve = install.resolve
+    -- Make the standalone backend *reachable* so the only thing that can stop
+    -- it is the LSP-attached guard (not a missing binary / unnamed buffer).
+    install.resolve = function()
+      return "/fake/m1-lint"
+    end
+    buf = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_name(buf, "/tmp/dedup.m1scr")
+  end)
+  after_each(function()
+    vim.lsp.get_clients = saved_get_clients
+    vim.system = saved_system
+    install.resolve = saved_resolve
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  it("does NOT run the standalone linter when m1lsp is attached", function()
+    vim.lsp.get_clients = function()
+      return { { name = require("nvim-m1.lsp").client_name } }
+    end
+    local ran = false
+    vim.system = function()
+      ran = true
+      return { wait = function() end }
+    end
+    lint.lint(buf)
+    vim.wait(50)
+    assert.is_false(ran, "standalone linter must defer to m1-lsp's diagnostics")
+  end)
+end)

@@ -91,3 +91,48 @@ describe("nvim-m1.lint end-to-end (needs m1-lint on $PATH)", function()
     )
   end)
 end)
+
+describe("nvim-m1.setup toolchain self-heal (#26)", function()
+  local install = require("nvim-m1.install")
+  local saved_stale, saved_install, saved_notify
+
+  before_each(function()
+    saved_stale = install.stale_tools
+    saved_install = install.install
+    saved_notify = vim.notify
+    vim.notify = function() end
+  end)
+  after_each(function()
+    install.stale_tools = saved_stale
+    install.install = saved_install
+    vim.notify = saved_notify
+  end)
+
+  it("reinstalls exactly the stale tools when the bundle is out of date", function()
+    install.stale_tools = function()
+      return { "m1-lint" }
+    end
+    local got
+    install.install = function(tools)
+      got = tools
+    end
+    nvim_m1.setup()
+    vim.wait(200, function()
+      return got ~= nil
+    end, 10)
+    assert.same({ "m1-lint" }, got)
+  end)
+
+  it("does not reinstall when the bundle is up to date", function()
+    install.stale_tools = function()
+      return {}
+    end
+    local called = false
+    install.install = function()
+      called = true
+    end
+    nvim_m1.setup()
+    vim.wait(100)
+    assert.is_false(called)
+  end)
+end)

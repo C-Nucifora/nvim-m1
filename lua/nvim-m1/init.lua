@@ -13,6 +13,7 @@ local lsp = require("nvim-m1.lsp")
 local format = require("nvim-m1.format")
 local lint = require("nvim-m1.lint")
 local project = require("nvim-m1.project")
+local install = require("nvim-m1.install")
 
 local M = {}
 
@@ -219,6 +220,24 @@ function M.setup(opts)
           .. "(or set opts.server_path). See :checkhealth nvim-m1.",
         vim.log.levels.WARN
       )
+    end)
+  end
+
+  -- Self-heal a stale bundle: if the on-disk binaries trail the pinned versions
+  -- (e.g. a `Lazy sync` whose build hook ran against an older pin), reinstall
+  -- just the stale tools so opening an M1 file repairs the toolchain with no
+  -- manual :M1Install. Only fires when binaries are actually bundled + behind.
+  -- (#26)
+  local stale = install.stale_tools()
+  if #stale > 0 then
+    vim.schedule(function()
+      vim.notify(
+        ("nvim-m1: bundled toolchain out of date (%s) — refreshing to the pinned versions…"):format(
+          table.concat(stale, ", ")
+        ),
+        vim.log.levels.INFO
+      )
+      install.install(stale)
     end)
   end
 

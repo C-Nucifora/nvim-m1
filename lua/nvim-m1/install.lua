@@ -224,10 +224,11 @@ local function resign(path)
 end
 
 --- Download one tool's pinned release binary into `bin_dir()` (re-signing it
---- ad-hoc on macOS so it will run).
+--- ad-hoc on macOS so it will run). Exposed on `M` so tests can stub the actual
+--- download.
 ---@param tool string
 ---@return boolean ok, string? err
-local function fetch(tool)
+function M.fetch(tool)
   local triple, suffix, err = M.platform()
   if not triple then
     return false, err
@@ -275,8 +276,64 @@ local function fetch(tool)
   return true
 end
 
+--- Path of the install manifest: a JSON `{ tool = version }` record of what
+--- `install()` last put on disk. It lets `stale_tools()` notice when the bundled
+--- binaries trail the pinned versions (e.g. after a `Lazy sync` whose build hook
+--- ran against an older pin) without shelling out to each binary. (#26)
+---@return string
+function M.manifest_path()
+  return M.bin_dir() .. "/.installed.json"
+end
+
+--- The versions recorded in the install manifest (empty table if none / unreadable).
+---@return table<string, string>
+function M.installed_versions()
+  local f = io.open(M.manifest_path(), "r")
+  if not f then
+    return {}
+  end
+  local content = f:read("*a")
+  f:close()
+  local ok, data = pcall(vim.json.decode, content)
+  if ok and type(data) == "table" then
+    return data
+  end
+  return {}
+end
+
+--- Persist the install manifest.
+---@param versions table<string, string>
+local function write_manifest(versions)
+  vim.fn.mkdir(M.bin_dir(), "p")
+  local f = io.open(M.manifest_path(), "w")
+  if not f then
+    return
+  end
+  f:write(vim.json.encode(versions))
+  f:close()
+end
+
+--- Default tools whose on-disk bundled binary does not match the pinned version
+--- (or that carry no manifest entry). Tools resolved from `$PATH`/an override, or
+--- simply not bundled on disk, are not "stale" — only the bundle is considered.
+--- (#26)
+---@return string[]
+function M.stale_tools()
+  local installed = M.installed_versions()
+  local stale = {}
+  for _, tool in ipairs(M.tools) do
+    if
+      vim.fn.executable(M.tool_path(tool)) == 1
+      and installed[tool] ~= M.versions[tool]
+    then
+      table.insert(stale, tool)
+    end
+  end
+  return stale
+end
+
 --- Install (download) the bundled M1 toolchain. Safe to re-run; overwrites with
---- the pinned versions.
+--- the pinned versions and records them in the manifest.
 ---@param tools? string[]  Subset to install (default: all of `M.tools`).
 ---@return boolean ok
 function M.install(tools)
@@ -287,15 +344,19 @@ function M.install(tools)
     return false
   end
 
+  local manifest = M.installed_versions()
   local all_ok = true
   for _, tool in ipairs(tools) do
     vim.notify(("nvim-m1: installing %s %s…"):format(tool, M.versions[tool]))
-    local ok, ferr = fetch(tool)
-    if not ok then
+    local ok, ferr = M.fetch(tool)
+    if ok then
+      manifest[tool] = M.versions[tool] -- record only what landed on disk
+    else
       all_ok = false
       vim.notify("nvim-m1: " .. tostring(ferr), vim.log.levels.ERROR)
     end
   end
+  write_manifest(manifest)
   if all_ok then
     vim.notify("nvim-m1: toolchain installed into " .. M.bin_dir())
   end
