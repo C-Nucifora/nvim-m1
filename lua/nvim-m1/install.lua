@@ -17,16 +17,22 @@
 --- completion, formatting and rename (it embeds m1-fmt/m1-lint/m1-typecheck).
 --- m1-project powers the `:M1*` project-editing commands; m1-fmt/m1-lint are
 --- fetched too so the conform.nvim / nvim-lint paths work without a manual install.
+---
+--- Every downloaded binary is verified against GitHub-native build provenance
+--- (`gh attestation verify`) before it is made executable / run, so a tampered
+--- or substituted release asset is rejected (HTTPS only protects the transport;
+--- the residual risk is upstream account/release compromise). See
+--- `M.attest_verify`. (nvim-m1#21)
 local M = {}
 
 --- Pinned tool versions this nvim-m1 release ships against. Bump these (and cut
 --- an nvim-m1 release) to upgrade the bundled toolchain — the Neovim analogue of
 --- m1-vscode's `package.json` `serverVersion` pin.
 M.versions = {
-  ["m1-lsp"] = "v0.23.0",
-  ["m1-fmt"] = "v0.4.3",
-  ["m1-lint"] = "v0.7.0",
-  ["m1-project"] = "v0.1.1",
+  ["m1-lsp"] = "v0.24.0",
+  ["m1-fmt"] = "v0.5.1",
+  ["m1-lint"] = "v0.8.0",
+  ["m1-project"] = "v0.2.0",
 }
 
 --- The GitHub repo each tool's release binaries come from.
@@ -101,6 +107,90 @@ function M.resolve(tool, explicit)
   return nil
 end
 
+--- Verify a freshly-downloaded binary's integrity via GitHub-native build
+--- provenance (`gh attestation verify`) BEFORE it is made executable / run.
+---
+--- The producer release workflows attach `actions/attest-build-provenance`
+--- attestations; this checks the on-disk artifact against the signed claim that
+--- `<repo>`'s Actions workflow built it, catching a tampered/substituted asset
+--- (the supply-chain risk: upstream account/release compromise or GitHub-side
+--- asset swap — HTTPS only protects the transport). (nvim-m1#21)
+---
+--- Verification is REQUIRED when it can run: a genuine mismatch aborts the
+--- install of that binary. It degrades to a WARN-and-proceed (returns ok) only
+--- when verification is impossible without hard-breaking users mid-rollout:
+---   * `gh` is not installed, or
+---   * `gh` is not authenticated (no token), or
+---   * the release predates attestation (no attestation found for this digest).
+--- These are the "can't verify" cases, distinct from "verified and WRONG".
+---@param path string  Path to the downloaded artifact.
+---@param repo string  `owner/name` the asset was downloaded from.
+---@return boolean ok, string? err
+function M.attest_verify(path, repo)
+  local gh = vim.fn.exepath("gh")
+  if gh == "" then
+    vim.notify(
+      ("nvim-m1: gh CLI not found — skipping build-provenance verification of %s. "):format(
+        repo
+      )
+        .. "Install GitHub CLI (https://cli.github.com) to verify downloaded binaries.",
+      vim.log.levels.WARN
+    )
+    return true
+  end
+
+  -- List form (no shell): `path` and `repo` are passed as argv elements, never
+  -- interpolated into a shell string, so no quoting/injection is possible even
+  -- if a value contained shell metacharacters.
+  local out = vim.fn.system({ gh, "attestation", "verify", path, "--repo", repo })
+  if vim.v.shell_error == 0 then
+    return true
+  end
+
+  -- Distinguish "can't verify" (warn + proceed) from "verified WRONG" (abort).
+  -- `gh` reuses a non-zero exit for both no-attestation-found and a real
+  -- mismatch, so key off the message: a 404 / "no attestations found" means the
+  -- release predates the attestation rollout; an auth prompt means no token.
+  local lower = (out or ""):lower()
+  local no_attestation = lower:find("no attestations found", 1, true)
+    or lower:find("http 404", 1, true)
+  local needs_auth = lower:find("gh auth login", 1, true)
+    or lower:find("gh_token", 1, true)
+
+  if no_attestation then
+    vim.notify(
+      ("nvim-m1: no build-provenance attestation found for %s (%s) — the pinned "):format(
+        repo,
+        path
+      )
+        .. "release predates attestation. Proceeding unverified; pin a newer "
+        .. "toolchain version to enable verification.",
+      vim.log.levels.WARN
+    )
+    return true
+  end
+
+  if needs_auth then
+    vim.notify(
+      ("nvim-m1: gh is not authenticated — skipping build-provenance verification of %s. "):format(
+        repo
+      ) .. "Run `gh auth login` (or set GH_TOKEN) to verify downloaded binaries.",
+      vim.log.levels.WARN
+    )
+    return true
+  end
+
+  -- Anything else from a present, authenticated gh against an attested release
+  -- is a genuine verification FAILURE: refuse to install this binary.
+  return false,
+    ("build-provenance verification FAILED for %s (%s) — refusing to install a "):format(
+      repo,
+      path
+    )
+      .. "binary whose attestation does not validate. Output:\n  "
+      .. tostring(out)
+end
+
 --- Whether a downloaded binary must be re-signed to run (macOS). The released
 --- `aarch64-apple-darwin` asset's ad-hoc signature does not validate on user
 --- machines, so AMFI kills it at exec (SIGKILL, "Code Signature Invalid"); a
@@ -166,6 +256,15 @@ local function fetch(tool)
     return false,
       ("failed to download %s %s\n  %s\n  %s"):format(tool, version, url, res)
   end
+
+  -- Verify build provenance BEFORE making the artifact executable or running it,
+  -- so a tampered/substituted asset is rejected at rest (it never gets +x). (#21)
+  local vok, verr = M.attest_verify(dest, repo)
+  if not vok then
+    os.remove(dest)
+    return false, verr
+  end
+
   if suffix == "" then
     vim.fn.system({ "chmod", "+x", dest })
   end
