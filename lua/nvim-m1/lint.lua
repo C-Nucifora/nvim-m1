@@ -130,10 +130,31 @@ function M.run_builtin(bufnr)
   )
 end
 
+--- Whether m1-lsp is attached to `bufnr`. The server embeds m1-lint and already
+--- publishes those diagnostics, so the standalone linter is only a fallback for
+--- when the LSP is unavailable; running both double-publishes every warning.
+--- (#25)
+---@param bufnr integer
+---@return boolean
+function M.lsp_attached(bufnr)
+  local name = require("nvim-m1.lsp").client_name
+  for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+    if c.name == name then
+      return true
+    end
+  end
+  return false
+end
+
 --- Lint a buffer with whichever backend is available.
 ---@param bufnr? integer
 function M.lint(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
+  -- Defer to m1-lsp when it is attached: it serves the same lint diagnostics, so
+  -- running the standalone linter too would publish every warning twice. (#25)
+  if M.lsp_attached(bufnr) then
+    return
+  end
   local ok, nvim_lint = pcall(require, "lint")
   if ok then
     nvim_lint.try_lint(
