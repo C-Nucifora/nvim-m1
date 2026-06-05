@@ -31,8 +31,8 @@ local M = {}
 M.versions = {
   ["m1-lsp"] = "v0.24.0",
   ["m1-fmt"] = "v0.5.1",
-  ["m1-lint"] = "v0.8.0",
-  ["m1-project"] = "v0.2.0",
+  ["m1-lint"] = "v0.8.1",
+  ["m1-project"] = "v0.2.1",
 }
 
 --- The GitHub repo each tool's release binaries come from.
