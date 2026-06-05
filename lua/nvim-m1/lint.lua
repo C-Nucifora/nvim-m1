@@ -183,7 +183,14 @@ function M.setup(cfg)
   -- Always (re)create the group so disabling clears a previously-wired hook.
   -- Manual linting (:M1Lint) works regardless of the save hook.
   local group = vim.api.nvim_create_augroup(GROUP, { clear = true })
-  if not cfg.lint_on_save then
+
+  -- When m1-lsp will attach it already serves these diagnostics live, so wiring
+  -- the standalone save/read hook too publishes every warning twice. The
+  -- BufReadPost hook fires *before* the async LSP attach, so a runtime
+  -- attached-check (M.lsp_attached, kept for :M1Lint) can't prevent it — skip
+  -- registration entirely whenever the LSP will provide lint. (#25)
+  local lsp_will_lint = cfg.lsp and require("nvim-m1.lsp").resolve_cmd(cfg) ~= nil
+  if not cfg.lint_on_save or lsp_will_lint then
     return
   end
 
