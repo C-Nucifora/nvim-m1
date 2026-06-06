@@ -32,7 +32,7 @@ M.versions = {
   ["m1-lsp"] = "v0.25.0",
   ["m1-fmt"] = "v0.6.0",
   ["m1-lint"] = "v0.10.0",
-  ["m1-project"] = "v0.2.2",
+  ["m1-project"] = "v0.2.3",
 }
 
 --- The GitHub repo each tool's release binaries come from.
