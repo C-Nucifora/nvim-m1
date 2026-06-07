@@ -75,6 +75,7 @@ formatting; standalone lint uses nvim-lint when present and otherwise a built-in
 | `root_markers` | `{ "Project.m1prj", ".git" }` | Files marking a project root. |
 | `auto_install_parser` | `true` | Run `:TSInstall m1` if the parser is missing. |
 | `lint_on_insert_leave` | `false` | Also lint on `InsertLeave`. |
+| `codelens` | `true` | Show m1-lsp code lenses (e.g. a script's `⚡ N Hz` rate) and keep them refreshed; run the lens under the cursor with `:M1CodeLensRun`. |
 | `capabilities` / `on_attach` | — | Forwarded to the LSP client. |
 | `settings` | `{}` | Unified m1-lsp config (lint/format/diagnostics), e.g. `{ lint = { max_line_length = 100 }, diagnostics = { ignore = { "T041" } } }`. A workspace `m1-tools.toml` overrides it. |
 

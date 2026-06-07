@@ -40,6 +40,11 @@ M.defaults = {
   on_attach = nil,
   settings = {},
 
+  -- Show m1-lsp code lenses (e.g. a script's `⚡ N Hz` execution rate) on m1
+  -- buffers and keep them refreshed. Run the lens under the cursor with
+  -- `:M1CodeLensRun`. Set false to disable display entirely.
+  codelens = true,
+
   -- Path to the m1-project binary (Project.m1prj editor for :M1CreateChannel etc.).
   -- nil = search $PATH for "m1-project".
   project_path = nil,
@@ -65,6 +70,7 @@ function M.resolve(opts)
     treesitter = { cfg.treesitter, "boolean" },
     auto_install_parser = { cfg.auto_install_parser, "boolean" },
     lsp = { cfg.lsp, "boolean" },
+    codelens = { cfg.codelens, "boolean" },
     capabilities = { cfg.capabilities, "table", true },
     on_attach = { cfg.on_attach, "function", true },
     settings = { cfg.settings, "table" },
