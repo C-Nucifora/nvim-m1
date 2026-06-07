@@ -202,6 +202,7 @@ function M.setup(opts)
 
   if cfg.lsp then
     lsp.setup(cfg)
+    require("nvim-m1.codelens").setup(cfg)
   end
   -- Always register the format/lint backends so :M1Format and :M1Lint work; the
   -- on-save autocmds are gated internally by cfg.format_on_save / lint_on_save.
