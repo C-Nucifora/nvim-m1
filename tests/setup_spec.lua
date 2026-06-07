@@ -101,6 +101,10 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
     saved_install = install.install
     saved_notify = vim.notify
     vim.notify = function() end
+    -- The self-heal is a once-per-session side effect (it must not re-schedule
+    -- overlapping installs on repeated setup()); reset the guard so each case
+    -- exercises a fresh first-setup.
+    nvim_m1._setup_done = false
   end)
   after_each(function()
     install.stale_tools = saved_stale
@@ -134,5 +138,24 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
     nvim_m1.setup()
     vim.wait(100)
     assert.is_false(called)
+  end)
+
+  it("self-heals at most once across repeated setup() calls (idempotent)", function()
+    install.stale_tools = function()
+      return { "m1-lint" }
+    end
+    local heals = 0
+    install.install = function()
+      heals = heals + 1
+    end
+    -- Three setup() calls in a row must schedule the heal only on the first;
+    -- otherwise concurrent install.install() runs race on the same binaries.
+    nvim_m1.setup()
+    nvim_m1.setup()
+    nvim_m1.setup()
+    vim.wait(200, function()
+      return heals > 0
+    end, 10)
+    assert.equals(1, heals)
   end)
 end)

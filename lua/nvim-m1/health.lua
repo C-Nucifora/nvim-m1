@@ -80,10 +80,9 @@ function M.check()
   end
 
   start("nvim-m1: tree-sitter")
-  local no_cc = vim.fn.exepath("cc") == ""
-    and vim.fn.exepath("gcc") == ""
-    and vim.fn.exepath("clang") == ""
-  if require("nvim-m1.treesitter").parser_installed() then
+  local treesitter = require("nvim-m1.treesitter")
+  local no_cc = treesitter.find_cc() == ""
+  if treesitter.parser_installed() then
     ok("`m1` parser installed")
   elseif no_cc then
     err("`m1` parser not built and no C compiler found", {
