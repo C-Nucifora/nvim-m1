@@ -99,10 +99,8 @@ local function generate_config(cfg)
     return
   end
   -- Place it at the M1 project root (nearest Project.m1prj above the buffer),
-  -- else the current working directory.
-  local cur = vim.api.nvim_buf_get_name(0)
-  local start = (cur ~= "" and vim.fs.dirname(cur)) or vim.fn.getcwd()
-  local marker = vim.fs.find({ "Project.m1prj" }, { path = start, upward = true })[1]
+  -- else the current working directory. Shares project.lua's one discovery rule.
+  local marker = project.project_file()
   local root = marker and vim.fs.dirname(marker) or vim.fn.getcwd()
   local target = root .. "/m1-tools.toml"
 
@@ -190,6 +188,12 @@ local function user_commands()
   )
 end
 
+--- Whether setup() has already run its once-only side effects (the bundle
+--- self-heal). Filetype/command/augroup registration is overwrite-safe and
+--- re-runs every call; the self-heal must not, or repeated setup() calls would
+--- re-schedule overlapping install.install() runs that race each other. (#26)
+M._setup_done = false
+
 --- Configure M1 script support. Idempotent.
 ---@param opts? table  See |NvimM1Config|.
 function M.setup(opts)
@@ -229,17 +233,27 @@ function M.setup(opts)
   -- just the stale tools so opening an M1 file repairs the toolchain with no
   -- manual :M1Install. Only fires when binaries are actually bundled + behind.
   -- (#26)
-  local stale = install.stale_tools()
-  if #stale > 0 then
-    vim.schedule(function()
-      vim.notify(
-        ("nvim-m1: bundled toolchain out of date (%s) — refreshing to the pinned versions…"):format(
-          table.concat(stale, ", ")
-        ),
-        vim.log.levels.INFO
-      )
-      install.install(stale)
-    end)
+  --
+  -- Guarded to run at most once per session: repeated setup() calls (or a setup
+  -- call landing while an earlier scheduled heal is still downloading) would
+  -- otherwise re-schedule overlapping install.install() runs that race each
+  -- other writing the same binaries/manifest. Filetype/command/augroup
+  -- registration above is overwrite-safe and intentionally re-runs every call;
+  -- only this one-shot heal needs the guard so the "Idempotent" claim holds.
+  if not M._setup_done then
+    M._setup_done = true
+    local stale = install.stale_tools()
+    if #stale > 0 then
+      vim.schedule(function()
+        vim.notify(
+          ("nvim-m1: bundled toolchain out of date (%s) — refreshing to the pinned versions…"):format(
+            table.concat(stale, ", ")
+          ),
+          vim.log.levels.INFO
+        )
+        install.install(stale)
+      end)
+    end
   end
 
   return M

@@ -15,7 +15,10 @@ function M.resolve_cmd(cfg)
 end
 
 --- The nearest `Project.m1prj` above the current buffer (or cwd), or nil.
-local function project_file()
+--- Exposed on `M` so other modules (e.g. init.lua's config scaffolder) share the
+--- one project-root discovery rule instead of re-implementing it inline.
+---@return string?
+function M.project_file()
   local cur = vim.api.nvim_buf_get_name(0)
   local start = (cur ~= "" and vim.fs.dirname(cur)) or vim.fn.getcwd()
   return vim.fs.find({ "Project.m1prj" }, { path = start, upward = true })[1]
@@ -46,15 +49,14 @@ local function run(cfg, args, ok_msg)
     )
     return
   end
-  local prj = project_file()
+  local prj = M.project_file()
   if not prj then
     vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
     return
   end
-  local cmd = { bin, args[1], "--project", prj }
-  for i = 2, #args do
-    table.insert(cmd, args[i])
-  end
+  -- `m1-project <subcommand> --project <prj> <rest…>`: keep the subcommand
+  -- (args[1]) first, then splice the project flag, then the remaining args.
+  local cmd = vim.list_extend({ bin, args[1], "--project", prj }, args, 2)
   local out = vim.fn.system(cmd)
   if vim.v.shell_error ~= 0 then
     vim.notify("nvim-m1: m1-project failed: " .. out, vim.log.levels.ERROR)
@@ -69,7 +71,7 @@ end
 ---@return string[]
 local function list_rates(cfg)
   local bin = M.resolve_cmd(cfg)
-  local prj = project_file()
+  local prj = M.project_file()
   if not bin or not prj then
     return {}
   end

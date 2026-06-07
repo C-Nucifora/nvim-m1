@@ -191,10 +191,13 @@ describe("nvim-m1.lint.lint (no double-publish, #25)", function()
   end)
 end)
 
-describe("nvim-m1.lint.setup autocmd gating (#25)", function()
-  -- The runtime guard alone can't stop the BufReadPost hook: it fires before the
-  -- async LSP attach, so the standalone linter must not be *wired* at all when
-  -- m1-lsp will provide diagnostics.
+describe("nvim-m1.lint.setup autocmd gating (#25, deferred decision)", function()
+  -- The hook is now ALWAYS wired when lint_on_save is set; whether it actually
+  -- runs the standalone linter is decided at fire time by M.lsp_will_lint, so a
+  -- later :M1Install (which makes m1-lsp resolvable) is honoured without a
+  -- re-setup. The runtime guard still can't stop the BufReadPost hook firing
+  -- before the async LSP attach — but the fire-time check resolves the server
+  -- even before it attaches, so it steps aside correctly anyway.
   local lsp = require("nvim-m1.lsp")
   local saved_resolve
 
@@ -209,11 +212,19 @@ describe("nvim-m1.lint.setup autocmd gating (#25)", function()
     lsp.resolve_cmd = saved_resolve
   end)
 
-  it("does NOT wire the save/read hook when m1-lsp will attach", function()
+  it("wires the save/read hook even when m1-lsp will attach", function()
     lsp.resolve_cmd = function()
       return "/usr/bin/m1-lsp"
     end
     lint.setup({ lint_on_save = true, lsp = true })
+    assert.is_true(#autocmds() >= 1)
+  end)
+
+  it("does NOT wire the hook when lint_on_save is disabled", function()
+    lsp.resolve_cmd = function()
+      return nil
+    end
+    lint.setup({ lint_on_save = false, lsp = false })
     assert.equals(0, #autocmds())
   end)
 
@@ -232,4 +243,57 @@ describe("nvim-m1.lint.setup autocmd gating (#25)", function()
     lint.setup({ lint_on_save = true, lsp = true })
     assert.is_true(#autocmds() >= 1)
   end)
+end)
+
+describe("nvim-m1.lint.lsp_will_lint (fire-time decision, #25)", function()
+  local lsp = require("nvim-m1.lsp")
+  local config = require("nvim-m1.config")
+  local saved_resolve, saved_get_clients
+
+  before_each(function()
+    saved_resolve = lsp.resolve_cmd
+    saved_get_clients = vim.lsp.get_clients
+    -- Not attached unless a test says so.
+    vim.lsp.get_clients = function()
+      return {}
+    end
+  end)
+  after_each(function()
+    lsp.resolve_cmd = saved_resolve
+    vim.lsp.get_clients = saved_get_clients
+  end)
+
+  it("is true when m1-lsp is enabled and resolvable (about to attach)", function()
+    lsp.resolve_cmd = function()
+      return "/usr/bin/m1-lsp"
+    end
+    assert.is_true(lint.lsp_will_lint(0, config.resolve({ lsp = true })))
+  end)
+
+  it("is false when m1-lsp is enabled but not found (standalone runs)", function()
+    lsp.resolve_cmd = function()
+      return nil
+    end
+    assert.is_false(lint.lsp_will_lint(0, config.resolve({ lsp = true })))
+  end)
+
+  it("is false when the LSP is disabled", function()
+    lsp.resolve_cmd = function()
+      return "/usr/bin/m1-lsp"
+    end
+    assert.is_false(lint.lsp_will_lint(0, config.resolve({ lsp = false })))
+  end)
+
+  it(
+    "is true when an m1lsp client is already attached, regardless of resolve",
+    function()
+      lsp.resolve_cmd = function()
+        return nil
+      end
+      vim.lsp.get_clients = function()
+        return { { name = lsp.client_name } }
+      end
+      assert.is_true(lint.lsp_will_lint(0, config.resolve({ lsp = true })))
+    end
+  )
 end)

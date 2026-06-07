@@ -146,6 +146,22 @@ function M.lsp_attached(bufnr)
   return false
 end
 
+--- Whether m1-lsp will serve lint diagnostics for `cfg` — either it is already
+--- attached to `bufnr`, or it is enabled and resolvable so it is about to
+--- attach. Evaluated at autocmd-fire time (not snapshotted at setup) so that
+--- installing m1-lsp later — e.g. via `:M1Install` — flips the decision without
+--- a re-setup, and conversely the standalone hook engages when the LSP is
+--- genuinely absent. (#25, deferred-decision fix)
+---@param bufnr integer
+---@param cfg NvimM1Config
+---@return boolean
+function M.lsp_will_lint(bufnr, cfg)
+  if M.lsp_attached(bufnr) then
+    return true
+  end
+  return cfg.lsp == true and require("nvim-m1.lsp").resolve_cmd(cfg) ~= nil
+end
+
 --- Lint a buffer with whichever backend is available.
 ---@param bufnr? integer
 function M.lint(bufnr)
@@ -184,13 +200,7 @@ function M.setup(cfg)
   -- Manual linting (:M1Lint) works regardless of the save hook.
   local group = vim.api.nvim_create_augroup(GROUP, { clear = true })
 
-  -- When m1-lsp will attach it already serves these diagnostics live, so wiring
-  -- the standalone save/read hook too publishes every warning twice. The
-  -- BufReadPost hook fires *before* the async LSP attach, so a runtime
-  -- attached-check (M.lsp_attached, kept for :M1Lint) can't prevent it — skip
-  -- registration entirely whenever the LSP will provide lint. (#25)
-  local lsp_will_lint = cfg.lsp and require("nvim-m1.lsp").resolve_cmd(cfg) ~= nil
-  if not cfg.lint_on_save or lsp_will_lint then
+  if not cfg.lint_on_save then
     return
   end
 
@@ -199,11 +209,25 @@ function M.setup(cfg)
     table.insert(events, "InsertLeave")
   end
 
+  -- Wire the standalone save/read hook whenever lint-on-save is enabled, but
+  -- decide whether to actually run it at FIRE time, not here. m1-lsp already
+  -- serves these diagnostics live, so running the standalone linter too would
+  -- double-publish — but a setup-time snapshot of "will the LSP lint?" goes
+  -- stale: if the user installs m1-lsp/m1-lint later (e.g. `:M1Install`) the
+  -- snapshot never updates, so the hook either never registers or never steps
+  -- aside. Deferring keeps the BufReadPost-before-async-attach guarantee (the
+  -- fire-time check resolves the server even before it attaches) while staying
+  -- correct as the toolchain appears/disappears. (#25)
   vim.api.nvim_create_autocmd(events, {
     group = group,
     pattern = "*.m1scr",
-    desc = "nvim-m1: lint on save",
+    desc = "nvim-m1: lint on save (defers to m1-lsp when it will lint)",
     callback = function(args)
+      -- `cfg` is the latest setup()'s config: the augroup is cleared and the
+      -- hook re-registered on every setup(), so this closure always sees it.
+      if M.lsp_will_lint(args.buf, cfg) then
+        return
+      end
       M.lint(args.buf)
     end,
   })

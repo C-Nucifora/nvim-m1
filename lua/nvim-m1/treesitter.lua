@@ -55,17 +55,25 @@ function M.parser_installed()
   return ok and loaded == true
 end
 
+--- Locate a C compiler on $PATH for building the m1 parser, preferring `cc`,
+--- then `gcc`, then `clang`. Returns "" when none is found. Shared so the
+--- compile path and `:checkhealth` agree on what counts as "a C compiler".
+---@return string  path to the compiler, or "" if none
+function M.find_cc()
+  for _, name in ipairs({ "cc", "gcc", "clang" }) do
+    local p = vim.fn.exepath(name)
+    if p ~= "" then
+      return p
+    end
+  end
+  return ""
+end
+
 --- Compile tree-sitter-m1's parser into a site `parser/m1.so` and load it.
 ---@param dir string  tree-sitter-m1 plugin dir
 ---@return boolean ok, string? err
 local function compile_parser(dir)
-  local cc = vim.fn.exepath("cc")
-  if cc == "" then
-    cc = vim.fn.exepath("gcc")
-  end
-  if cc == "" then
-    cc = vim.fn.exepath("clang")
-  end
+  local cc = M.find_cc()
   if cc == "" then
     return false, "no C compiler (cc/gcc/clang) on $PATH to build the m1 parser"
   end
