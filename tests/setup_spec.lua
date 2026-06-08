@@ -42,11 +42,15 @@ describe("nvim-m1.setup", function()
     assert.is_not_nil(cmds.M1GenerateConfig)
   end)
 
-  it("only wires format-on-save when enabled", function()
+  it("seeds the format gate off but still wires the hook when disabled", function()
+    -- The BufWritePre hook is always wired and gated at fire time by
+    -- g:nvim_m1_format_on_save, so :M1FormatToggle can enable format-on-save at
+    -- runtime even when setup started with format_on_save = false. (mirrors the
+    -- lint deferred-decision design)
     nvim_m1.setup({ format_on_save = false })
     assert.is_false(vim.g.nvim_m1_format_on_save)
     local autocmds = vim.api.nvim_get_autocmds({ group = "NvimM1Format" })
-    assert.equals(0, #autocmds)
+    assert.is_true(#autocmds >= 1)
   end)
 
   it("wires a BufWritePre format hook when enabled", function()

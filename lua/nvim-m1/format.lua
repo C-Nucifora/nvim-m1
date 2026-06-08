@@ -60,20 +60,22 @@ end
 function M.setup(cfg)
   register_conform()
 
-  -- setup() is authoritative for the toggle; :M1FormatToggle overrides at runtime.
+  -- setup() seeds the runtime gate from the config; :M1FormatToggle flips it at
+  -- runtime. The gate is read at FIRE time (below), never snapshotted into
+  -- whether the hook exists — so toggling on works even when the user started
+  -- with format_on_save = false. (mirrors lint.lua's deferred-decision design)
   vim.g.nvim_m1_format_on_save = cfg.format_on_save
 
-  -- Always (re)create the group so disabling clears a previously-wired hook.
-  -- Manual formatting (:M1Format) works regardless of the save hook.
+  -- Always (re)create the group and wire the BufWritePre hook. The hook itself
+  -- is gated by `vim.g.nvim_m1_format_on_save` at fire time, so a setup with
+  -- format_on_save = false simply leaves the gate off — :M1FormatToggle can then
+  -- enable it without a re-setup. (Manual :M1Format works regardless.)
   local group = vim.api.nvim_create_augroup(GROUP, { clear = true })
-  if not cfg.format_on_save then
-    return
-  end
 
   vim.api.nvim_create_autocmd("BufWritePre", {
     group = group,
     pattern = "*.m1scr",
-    desc = "nvim-m1: format on save",
+    desc = "nvim-m1: format on save (gated by g:nvim_m1_format_on_save)",
     callback = function(args)
       if vim.g.nvim_m1_format_on_save then
         M.format(args.buf, cfg)
