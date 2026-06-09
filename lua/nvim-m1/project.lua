@@ -85,6 +85,29 @@ end
 local SECURITY = { "Tune", "Calibration", "Master Calibration", "Resource" }
 local TYPES = { "(none)", "f32", "f64", "u8", "u16", "u32", "s8", "s16", "s32", "bool" }
 
+--- Prompt for a component path unless the caller (e.g. the telescope-m1
+--- components picker) already knows it.
+---@param component? string
+---@param cb fun(component: string)
+local function with_component(component, cb)
+  if component and component ~= "" then
+    cb(component)
+    return
+  end
+  vim.ui.input({ prompt = "Component (Root.…): " }, function(c)
+    if c and c ~= "" then
+      cb(c)
+    end
+  end)
+end
+
+--- The project's execution-rate clocks (public for telescope-m1's rates picker).
+---@param cfg NvimM1Config
+---@return string[]
+function M.rates(cfg)
+  return list_rates(cfg)
+end
+
 --- :M1CreateChannel — prompt for name/type/unit/security, then create-channel.
 function M.create_channel(cfg)
   vim.ui.input({ prompt = "New channel (Root.Group.Name): " }, function(name)
@@ -127,20 +150,53 @@ function M.create_channel(cfg)
   end)
 end
 
---- :M1SetSecurity — prompt for component + level, then set-security.
-function M.set_security(cfg)
-  vim.ui.input({ prompt = "Component (Root.…): " }, function(component)
-    if not component or component == "" then
-      return
-    end
+--- :M1SetSecurity — prompt for component (unless given) + level.
+---@param component? string  Pre-selected component (telescope action).
+function M.set_security(cfg, component)
+  with_component(component, function(comp)
     vim.ui.select(SECURITY, { prompt = "Security" }, function(sec)
       if not sec then
         return
       end
       run(
         cfg,
-        { "set-security", "--component", component, "--security", sec },
-        component .. " security -> " .. sec
+        { "set-security", "--component", comp, "--security", sec },
+        comp .. " security -> " .. sec
+      )
+    end)
+  end)
+end
+
+--- :M1SetType — prompt for component (unless given) + storage type (#46).
+---@param component? string
+function M.set_type(cfg, component)
+  with_component(component, function(comp)
+    local types = vim.list_slice(TYPES, 2) -- no "(none)": set-type needs a value
+    vim.ui.select(types, { prompt = "Storage type" }, function(ty)
+      if not ty then
+        return
+      end
+      run(
+        cfg,
+        { "set-type", "--component", comp, "--type", ty },
+        comp .. " type -> " .. ty
+      )
+    end)
+  end)
+end
+
+--- :M1SetUnit — prompt for component (unless given) + display unit (#46).
+---@param component? string
+function M.set_unit(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Unit (e.g. rpm, kPa): " }, function(unit)
+      if not unit or unit == "" then
+        return
+      end
+      run(
+        cfg,
+        { "set-unit", "--component", comp, "--unit", unit },
+        comp .. " unit -> " .. unit
       )
     end)
   end)

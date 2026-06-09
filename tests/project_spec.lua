@@ -64,3 +64,29 @@ describe("nvim-m1.project", function()
     assert.is_truthy(written:find('Type="f32"', 1, true))
   end)
 end)
+
+describe("nvim-m1 next-gen additions", function()
+  it("registers M1SetType and M1SetUnit (#46)", function()
+    require("nvim-m1").setup()
+    local cmds = vim.api.nvim_get_commands({})
+    assert.is_not_nil(cmds.M1SetType)
+    assert.is_not_nil(cmds.M1SetUnit)
+  end)
+
+  it("statusline component is empty outside M1 buffers (#47)", function()
+    vim.cmd.enew()
+    vim.bo.filetype = "lua"
+    assert.equals("", require("nvim-m1.statusline").component())
+  end)
+
+  it("statusline shows the disconnected marker in M1 buffers (#47)", function()
+    vim.cmd.enew()
+    vim.bo.filetype = "m1scr"
+    -- No client attached in the test harness.
+    assert.equals("m1 ✗", require("nvim-m1.statusline").component())
+  end)
+
+  it("which-key registration is a silent no-op without which-key (#48)", function()
+    assert.is_false(require("nvim-m1.whichkey").register())
+  end)
+end)

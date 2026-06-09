@@ -98,7 +98,7 @@ with all defaults via `:M1GenerateConfig`.
 | `:M1GenerateConfig` | Write a default `m1-tools.toml` to the project root. |
 | `:M1CreateChannel` | Create a channel in `Project.m1prj` (prompts for name/type/unit/security). |
 | `:M1SetSecurity` | Set a component's security/access level. |
-| `:M1SetCallRate` | Set a script's execution rate (picked from the project's clocks). |
+| `:M1SetType / :M1SetUnit / :M1SetCallRate` | Set a script's execution rate (picked from the project's clocks). |
 | `:M1Install` / `:M1Update` | Download the bundled M1 toolchain at the pinned versions. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
@@ -140,3 +140,25 @@ GPL-3.0-or-later — see [LICENSE](LICENSE).
 Independent, community-built open-source tooling for the MoTeC® M1 script
 language. Not affiliated with, authorised, or endorsed by MoTeC Pty Ltd.
 "MoTeC" and "M1" are trademarks of MoTeC Pty Ltd.
+
+## Statusline component
+
+`require("nvim-m1.statusline").component` returns `"m1 v<server-version>"`
+when the m1-lsp client is attached to the current M1 buffer, `"m1 ✗"` when it
+is not, and `""` in non-M1 buffers. Drop it into lualine:
+
+```lua
+sections = { lualine_x = { require("nvim-m1.statusline").component } }
+```
+
+## which-key labels
+
+With [which-key](https://github.com/folke/which-key.nvim) installed:
+
+```lua
+require("nvim-m1.whichkey").register()                    -- <leader>m…
+require("nvim-m1.whichkey").register({ prefix = "<leader>k" })
+```
+
+registers labelled bindings for every `:M1*` command (a silent no-op when
+which-key is absent).
