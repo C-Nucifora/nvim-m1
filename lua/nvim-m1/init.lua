@@ -176,6 +176,20 @@ local function user_commands()
     project.set_call_rate(M.config or config.defaults)
   end, { desc = "nvim-m1: set a script's execution rate (m1-project)" })
 
+  -- #51: the m1-project v0.3.0 verbs.
+  vim.api.nvim_create_user_command("M1CreateGroup", function()
+    project.create_group(M.config or config.defaults)
+  end, { desc = "nvim-m1: create a group in Project.m1prj (m1-project)" })
+  vim.api.nvim_create_user_command("M1DeleteComponent", function()
+    project.delete_component(M.config or config.defaults)
+  end, { desc = "nvim-m1: delete a component (m1-project, confirms first)" })
+  vim.api.nvim_create_user_command("M1RenameComponent", function()
+    project.rename_component(M.config or config.defaults)
+  end, { desc = "nvim-m1: rename a component + its trigger references (m1-project)" })
+  vim.api.nvim_create_user_command("M1ValidateProject", function()
+    project.validate(M.config or config.defaults)
+  end, { desc = "nvim-m1: validate Project.m1prj into the quickfix list (m1-project)" })
+
   vim.api.nvim_create_user_command(
     "M1Install",
     function()

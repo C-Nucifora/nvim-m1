@@ -73,6 +73,59 @@ describe("nvim-m1 next-gen additions", function()
     assert.is_not_nil(cmds.M1SetUnit)
   end)
 
+  it("registers the m1-project v0.3.0 verbs (#51)", function()
+    require("nvim-m1").setup()
+    local cmds = vim.api.nvim_get_commands({})
+    assert.is_not_nil(cmds.M1CreateGroup)
+    assert.is_not_nil(cmds.M1DeleteComponent)
+    assert.is_not_nil(cmds.M1RenameComponent)
+    assert.is_not_nil(cmds.M1ValidateProject)
+  end)
+
+  -- End-to-end (#51): with the real binary, create-group edits the file and
+  -- validate fills the quickfix list without errors.
+  it("create_group + validate drive the real binary (#51)", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local project = require("nvim-m1.project")
+    local config = require("nvim-m1.config")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb("Root.Engine.Sub")
+    end
+    local okp = pcall(function()
+      project.create_group(config.resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find('Name="Root.Engine.Sub"', 1, true),
+      "m1-project should have inserted the group: " .. written
+    )
+
+    assert.has_no.errors(function()
+      project.validate(config.resolve())
+    end)
+    local qf = vim.fn.getqflist({ title = true, items = true })
+    assert.equals("m1-project validate", qf.title)
+    assert.equals(0, #qf.items, "clean fixture must produce no findings")
+  end)
+
   it("statusline component is empty outside M1 buffers (#47)", function()
     vim.cmd.enew()
     vim.bo.filetype = "lua"

@@ -99,10 +99,14 @@ with all defaults via `:M1GenerateConfig`.
 | `:M1CreateChannel` | Create a channel in `Project.m1prj` (prompts for name/type/unit/security). |
 | `:M1SetSecurity` | Set a component's security/access level. |
 | `:M1SetType / :M1SetUnit / :M1SetCallRate` | Set a script's execution rate (picked from the project's clocks). |
+| `:M1CreateGroup` | Create a group in `Project.m1prj` (prompts for the fully-qualified name). |
+| `:M1RenameComponent` | Rename a component (picked from the project) and update its trigger references; warns when a backing `.m1scr` file may need renaming too. |
+| `:M1DeleteComponent` | Delete a component (picked from the project, confirms first; optional subtree). |
+| `:M1ValidateProject` | Validate `Project.m1prj` structure into the quickfix list. |
 | `:M1Install` / `:M1Update` | Download the bundled M1 toolchain at the pinned versions. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
-The last three edit `Project.m1prj` through the [`m1-project`](https://github.com/nedlane/m1-project)
+The project-editing commands drive `Project.m1prj` through the [`m1-project`](https://github.com/nedlane/m1-project)
 binary (the same tool the VS Code extension uses) — the language server stays
 read-only and reloads automatically after an edit. Put `m1-project` on `$PATH`
 (or set `project_path`); `:checkhealth nvim-m1` reports whether it's found.

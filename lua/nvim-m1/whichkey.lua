@@ -25,6 +25,10 @@ function M.register(opts)
     { p .. "t", "<cmd>M1SetType<cr>", desc = "Set storage type" },
     { p .. "u", "<cmd>M1SetUnit<cr>", desc = "Set display unit" },
     { p .. "r", "<cmd>M1SetCallRate<cr>", desc = "Set call rate" },
+    { p .. "G", "<cmd>M1CreateGroup<cr>", desc = "Create group" },
+    { p .. "R", "<cmd>M1RenameComponent<cr>", desc = "Rename component" },
+    { p .. "D", "<cmd>M1DeleteComponent<cr>", desc = "Delete component" },
+    { p .. "v", "<cmd>M1ValidateProject<cr>", desc = "Validate project" },
     { p .. "i", "<cmd>M1Install<cr>", desc = "Install/update toolchain" },
   })
   return true
