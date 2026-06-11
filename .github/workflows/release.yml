@@ -38,8 +38,37 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ steps.v.outputs.version }}
         run: |
+          # Body: auto-generated "What's Changed" (PR list + full changelog
+          # link) followed by a consume/install snippet. PR titles may contain
+          # backticks, so the generated half never passes through an unquoted
+          # heredoc; the static half is a quoted heredoc with placeholders
+          # substituted afterwards.
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+            -q .body > body.md || echo "_Generated notes unavailable._" > body.md
+          cat >> body.md <<'NOTES'
+
+          ## Install
+
+          ```lua
+          -- lazy.nvim
+          { "{{REPO}}", version = "{{TAG}}" }
+          ```
+          NOTES
+          sed -i "s|{{REPO}}|$GITHUB_REPOSITORY|g; s|{{TAG}}|$TAG|g" body.md
+          # The toolchain this version bundles, straight from install.lua.
+          {
+            echo ""
+            echo "## Bundled toolchain"
+            echo ""
+            echo "The plugin installs these pinned tools on first run (and self-heals after plugin updates):"
+            echo ""
+            echo "| Tool | Version |"
+            echo "| --- | --- |"
+            sed -n 's/^\s*\["\(m1-[a-z]*\)"\] = "\(v[0-9.]*\)".*/| \1 | \2 |/p' lua/nvim-m1/install.lua
+          } >> body.md
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "nvim-m1 $TAG" \
-            --generate-notes
+            --notes-file body.md
