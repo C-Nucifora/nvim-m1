@@ -158,6 +158,17 @@ local function user_commands()
     desc = "nvim-m1: write a default m1-tools.toml to the project root",
   })
 
+  -- Register a project command that always passes the resolved config, falling
+  -- back to config.defaults when invoked before setup() (M.config is nil until
+  -- then). Loop-driven so the fallback can't be forgotten per verb — #69 was two
+  -- hand-rolled commands (M1SetType/M1SetUnit) that passed raw M.config and so
+  -- indexed nil pre-setup; routing every verb through here makes that impossible.
+  local function proj_cmd(name, fn, desc)
+    vim.api.nvim_create_user_command(name, function()
+      project[fn](M.config or config.defaults)
+    end, { desc = "nvim-m1: " .. desc .. " (m1-project)" })
+  end
+
   vim.api.nvim_create_user_command("M1CreateChannel", function()
     project.create_channel(M.config or config.defaults)
   end, { desc = "nvim-m1: create a channel in Project.m1prj (m1-project)" })
@@ -166,12 +177,8 @@ local function user_commands()
     project.set_security(M.config or config.defaults)
   end, { desc = "nvim-m1: set a component's security level (m1-project)" })
 
-  vim.api.nvim_create_user_command("M1SetType", function()
-    require("nvim-m1.project").set_type(M.config)
-  end, { desc = "M1: set a component's storage type (m1-project)" })
-  vim.api.nvim_create_user_command("M1SetUnit", function()
-    require("nvim-m1.project").set_unit(M.config)
-  end, { desc = "M1: set a component's display unit (m1-project)" })
+  proj_cmd("M1SetType", "set_type", "set a component's storage type")
+  proj_cmd("M1SetUnit", "set_unit", "set a component's display unit")
   vim.api.nvim_create_user_command("M1SetCallRate", function()
     project.set_call_rate(M.config or config.defaults)
   end, { desc = "nvim-m1: set a script's execution rate (m1-project)" })
@@ -191,11 +198,6 @@ local function user_commands()
   end, { desc = "nvim-m1: validate Project.m1prj into the quickfix list (m1-project)" })
 
   -- #61: the remaining m1-project v0.4.0 verbs.
-  local function proj_cmd(name, fn, desc)
-    vim.api.nvim_create_user_command(name, function()
-      project[fn](M.config or config.defaults)
-    end, { desc = "nvim-m1: " .. desc .. " (m1-project)" })
-  end
   proj_cmd(
     "M1CreateParameter",
     "create_parameter",
