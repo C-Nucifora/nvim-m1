@@ -39,34 +39,116 @@ function M.notify_reload(prj)
   end
 end
 
+--- Per-project mutation serialization. `m1-project` does a read-modify-write of
+--- Project.m1prj, so two subprocesses racing on one file lose edits (last writer
+--- wins). The old synchronous `vim.fn.system` prevented that for free; the async
+--- `vim.system` migration (#68) reintroduced it. Chain each project file's
+--- mutations through a per-file queue so only one runs at a time, and surface
+--- completion so callers (and the test suite) can await it instead of sleeping
+--- (#71).
+---@class M1MutationQueue
+---@field running boolean
+---@field pending table[]  Queued jobs: { cmd, ok_msg, on_done?, on_success? }
+local queues = {} ---@type table<string, M1MutationQueue>
+
+--- Whether every pending project mutation (or those for `prj`, if given) has
+--- finished. Callers and tests poll this via `vim.wait` to await completion
+--- deterministically — the "queue handle" the async runner exposes.
+---@param prj? string
+---@return boolean
+function M.is_idle(prj)
+  local function idle(q)
+    return not q or (not q.running and #q.pending == 0)
+  end
+  if prj then
+    return idle(queues[prj])
+  end
+  for _, q in pairs(queues) do
+    if not idle(q) then
+      return false
+    end
+  end
+  return true
+end
+
+--- Start the next queued mutation for `prj` unless one is already running. The
+--- completion handler re-enters the main thread (vim.schedule) before touching
+--- the LSP, notifying, or starting the next job, then drains the queue in order.
+---@param prj string
+local function drain(prj)
+  local q = queues[prj]
+  if not q or q.running or #q.pending == 0 then
+    return
+  end
+  q.running = true
+  local job = table.remove(q.pending, 1)
+  vim.system(job.cmd, { text = true }, function(res)
+    vim.schedule(function()
+      local ok = res.code == 0
+      if ok then
+        M.notify_reload(prj)
+        if job.on_success then
+          job.on_success(res)
+        elseif job.ok_msg then
+          vim.notify("nvim-m1: " .. job.ok_msg)
+        end
+      else
+        vim.notify(
+          "nvim-m1: m1-project failed: " .. (res.stderr or res.stdout or ""),
+          vim.log.levels.ERROR
+        )
+      end
+      q.running = false
+      if job.on_done then
+        job.on_done(ok, ok and nil or (res.stderr or res.stdout or ""))
+      end
+      drain(prj) -- next queued mutation for this project, in submission order
+    end)
+  end)
+end
+
 --- Run `m1-project <args>` against the project; on success, reload the LSP.
+--- Async (vim.system, 0.10+) so the subprocess never freezes the editor (#68),
+--- serialized per project file so concurrent edits can't clobber each other, and
+--- reporting completion through `opts.on_done` (#71).
 ---@param cfg NvimM1Config
 ---@param args string[]
----@param ok_msg string
-local function run(cfg, args, ok_msg)
+---@param ok_msg? string  Success toast; omit when `opts.on_success` handles it.
+---@param opts? { on_done?: fun(ok: boolean, err: string?), on_success?: fun(res: table) }
+local function run(cfg, args, ok_msg, opts)
+  opts = opts or {}
   local bin = M.resolve_cmd(cfg)
   if not bin then
     vim.notify(
       "nvim-m1: m1-project not found (set opts.project_path or install it on $PATH)",
       vim.log.levels.ERROR
     )
+    if opts.on_done then
+      opts.on_done(false, "m1-project not found")
+    end
     return
   end
   local prj = M.project_file()
   if not prj then
     vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
+    if opts.on_done then
+      opts.on_done(false, "no Project.m1prj")
+    end
     return
   end
   -- `m1-project <subcommand> --project <prj> <rest…>`: keep the subcommand
   -- (args[1]) first, then splice the project flag, then the remaining args.
   local cmd = vim.list_extend({ bin, args[1], "--project", prj }, args, 2)
-  local out = vim.fn.system(cmd)
-  if vim.v.shell_error ~= 0 then
-    vim.notify("nvim-m1: m1-project failed: " .. out, vim.log.levels.ERROR)
-    return
+  local q = queues[prj]
+  if not q then
+    q = { running = false, pending = {} }
+    queues[prj] = q
   end
-  M.notify_reload(prj)
-  vim.notify("nvim-m1: " .. ok_msg)
+  table.insert(
+    q.pending,
+    { cmd = cmd, ok_msg = ok_msg, on_done = opts.on_done, on_success = opts.on_success }
+  )
+  drain(prj)
 end
 
 --- The execution rates (`On <N>Hz` clocks) the project defines, via `list-rates`.
@@ -78,11 +160,18 @@ local function list_rates(cfg)
   if not bin or not prj then
     return {}
   end
-  local out = vim.fn.system({ bin, "list-rates", "--project", prj })
-  if vim.v.shell_error ~= 0 then
+  -- :wait() pumps the event loop (vs vim.fn.system's hard block) and the
+  -- timeout turns a hung subprocess into a clean empty result, not a freeze
+  -- (#68). The caller needs the rates synchronously to build the picker.
+  local ok, res = pcall(function()
+    return vim
+      .system({ bin, "list-rates", "--project", prj }, { text = true })
+      :wait(5000)
+  end)
+  if not ok or res.code ~= 0 then
     return {}
   end
-  return vim.split(vim.trim(out), "\n", { trimempty = true })
+  return vim.split(vim.trim(res.stdout or ""), "\n", { trimempty = true })
 end
 
 local SECURITY = { "Tune", "Calibration", "Master Calibration", "Resource" }
@@ -216,10 +305,18 @@ local function component_paths(cfg)
   if not bin or not prj then
     return {}
   end
-  local out = vim.fn.system({ bin, "list-components", "--project", prj, "--json" })
-  if vim.v.shell_error ~= 0 then
+  -- :wait() pumps the loop instead of hard-blocking, and the timeout degrades a
+  -- hung subprocess to an empty list rather than freezing the editor (#68).
+  -- pick_component() needs these synchronously to populate vim.ui.select.
+  local ran, res = pcall(function()
+    return vim
+      .system({ bin, "list-components", "--project", prj, "--json" }, { text = true })
+      :wait(5000)
+  end)
+  if not ran or res.code ~= 0 then
     return {}
   end
+  local out = res.stdout or ""
   local ok, decoded = pcall(vim.json.decode, out)
   if not ok or type(decoded) ~= "table" then
     return {}
@@ -299,46 +396,23 @@ function M.rename_component(cfg, component)
         if not new_name or new_name == "" or new_name:find("%.") then
           return
         end
-        local bin = M.resolve_cmd(cfg)
-        local prj = M.project_file()
-        if not bin or not prj then
-          vim.notify(
-            "nvim-m1: m1-project or Project.m1prj not found",
-            vim.log.levels.ERROR
-          )
-          return
-        end
-        -- vim.system rather than run(): rename's backing-script-filename
-        -- warnings arrive on stderr and must reach the user.
-        local res = vim
-          .system({
-            bin,
-            "rename-component",
-            "--project",
-            prj,
-            "--name",
-            comp,
-            "--new-name",
-            new_name,
-          })
-          :wait()
-        if res.code ~= 0 then
-          vim.notify(
-            "nvim-m1: rename failed: " .. (res.stderr or res.stdout or ""),
-            vim.log.levels.ERROR
-          )
-          return
-        end
-        M.notify_reload(prj)
-        local warn = vim.trim(res.stderr or "")
-        if warn ~= "" then
-          vim.notify(
-            "nvim-m1: renamed " .. comp .. " -> " .. new_name .. "\n" .. warn,
-            vim.log.levels.WARN
-          )
-        else
-          vim.notify("nvim-m1: renamed " .. comp .. " -> " .. new_name)
-        end
+        -- Goes through the same per-project queue as every other mutation so a
+        -- rename can't race a queued create/delete on the file. rename's
+        -- backing-script-filename guidance arrives on stderr even on success, so
+        -- surface it via on_success rather than the default ok-toast.
+        run(cfg, { "rename-component", "--name", comp, "--new-name", new_name }, nil, {
+          on_success = function(res)
+            local warn = vim.trim(res.stderr or "")
+            if warn ~= "" then
+              vim.notify(
+                "nvim-m1: renamed " .. comp .. " -> " .. new_name .. "\n" .. warn,
+                vim.log.levels.WARN
+              )
+            else
+              vim.notify("nvim-m1: renamed " .. comp .. " -> " .. new_name)
+            end
+          end,
+        })
       end
     )
   end)

@@ -115,11 +115,18 @@ local function generate_config(cfg)
     end
   end
 
-  local out = vim.fn.system({ bin, "--scaffold-config" })
-  if vim.v.shell_error ~= 0 then
-    vim.notify("nvim-m1: --scaffold-config failed: " .. out, vim.log.levels.ERROR)
+  -- :wait() pumps the event loop instead of hard-blocking, and the timeout
+  -- turns a hung server into a clean error rather than a freeze (#68). The
+  -- scaffolded config is needed synchronously to write the file below.
+  local ran, res = pcall(function()
+    return vim.system({ bin, "--scaffold-config" }, { text = true }):wait(10000)
+  end)
+  if not ran or res.code ~= 0 then
+    local detail = ran and (res.stderr or res.stdout or "") or "timed out"
+    vim.notify("nvim-m1: --scaffold-config failed: " .. detail, vim.log.levels.ERROR)
     return
   end
+  local out = res.stdout or ""
 
   local fh, err = io.open(target, "w")
   if not fh then
