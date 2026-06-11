@@ -102,7 +102,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
 
   before_each(function()
     saved_stale = install.stale_tools
-    saved_install = install.install
+    saved_install = install.install_async
     saved_notify = vim.notify
     vim.notify = function() end
     -- The self-heal is a once-per-session side effect (it must not re-schedule
@@ -112,7 +112,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
   end)
   after_each(function()
     install.stale_tools = saved_stale
-    install.install = saved_install
+    install.install_async = saved_install
     vim.notify = saved_notify
   end)
 
@@ -121,7 +121,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
       return { "m1-lint" }
     end
     local got
-    install.install = function(tools)
+    install.install_async = function(tools)
       got = tools
     end
     nvim_m1.setup()
@@ -136,7 +136,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
       return {}
     end
     local called = false
-    install.install = function()
+    install.install_async = function()
       called = true
     end
     nvim_m1.setup()
@@ -149,7 +149,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
       return { "m1-lint" }
     end
     local heals = 0
-    install.install = function()
+    install.install_async = function()
       heals = heals + 1
     end
     -- Three setup() calls in a row must schedule the heal only on the first;
@@ -161,5 +161,38 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
       return heals > 0
     end, 10)
     assert.equals(1, heals)
+  end)
+
+  it("re-runs lsp.setup after a successful heal so open buffers attach", function()
+    install.stale_tools = function()
+      return { "m1-lsp" }
+    end
+    local heal_cb
+    install.install_async = function(_, cb)
+      heal_cb = cb
+    end
+    local lsp = require("nvim-m1.lsp")
+    local saved_lsp_setup = lsp.setup
+    nvim_m1.setup()
+    vim.wait(200, function()
+      return heal_cb ~= nil
+    end, 10)
+    assert.is_function(
+      heal_cb,
+      "self-heal must pass install_async a completion callback"
+    )
+    -- The freshly-installed server must be (re)registered once the download
+    -- lands: vim.lsp.enable attaches to already-open M1 buffers (0.11+).
+    local lsp_setups = 0
+    lsp.setup = function()
+      lsp_setups = lsp_setups + 1
+      return true
+    end
+    heal_cb(true)
+    vim.wait(200, function()
+      return lsp_setups > 0
+    end, 10)
+    lsp.setup = saved_lsp_setup
+    assert.equals(1, lsp_setups)
   end)
 end)

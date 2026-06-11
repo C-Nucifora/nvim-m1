@@ -226,7 +226,7 @@ local function user_commands()
   vim.api.nvim_create_user_command(
     "M1Install",
     function()
-      require("nvim-m1.install").install()
+      M._install_tools_async()
     end,
     { desc = "nvim-m1: download the bundled M1 toolchain (m1-lsp/fmt/lint/project)" }
   )
@@ -235,10 +235,24 @@ local function user_commands()
   vim.api.nvim_create_user_command(
     "M1Update",
     function()
-      require("nvim-m1.install").install()
+      M._install_tools_async()
     end,
     { desc = "nvim-m1: re-download the bundled M1 toolchain at the pinned versions" }
   )
+end
+
+--- Download the given tools (default: all) WITHOUT blocking the editor, then
+--- (re)register the language server: `vim.lsp.enable` (0.11+) attaches the
+--- freshly-installed m1-lsp to already-open M1 buffers, so the toolchain
+--- repair needs no `:e` or restart. Shared by :M1Install/:M1Update and the
+--- first-open self-heal (#65).
+---@param tools? string[]
+function M._install_tools_async(tools)
+  install.install_async(tools, function(ok)
+    if ok and M.config and M.config.lsp then
+      require("nvim-m1.lsp").setup(M.config)
+    end
+  end)
 end
 
 --- Whether setup() has already run its once-only side effects (the bundle
@@ -304,7 +318,9 @@ function M.setup(opts)
           ),
           vim.log.levels.INFO
         )
-        install.install(stale)
+        -- Async: the downloads + provenance checks run off the UI thread, so
+        -- the first .m1scr open no longer freezes for the whole refresh (#65).
+        M._install_tools_async(stale)
       end)
     end
   end
