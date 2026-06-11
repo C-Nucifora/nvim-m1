@@ -21,7 +21,8 @@
 --- keeps working on the legacy master branch, but it is no longer required.
 local M = {}
 
-local QUERY_KINDS = { "highlights", "folds", "indents", "injections", "locals" }
+local QUERY_KINDS =
+  { "highlights", "folds", "indents", "injections", "locals", "textobjects" }
 
 --- Locate the tree-sitter-m1 plugin directory on the runtimepath. It ships
 --- `src/parser.c`, `src/scanner.c` and `queries/*.scm`.

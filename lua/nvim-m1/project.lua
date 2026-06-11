@@ -413,4 +413,208 @@ function M.set_call_rate(cfg)
   end)
 end
 
+--- :M1CreateParameter — prompt for name + type + unit + security (#61).
+function M.create_parameter(cfg)
+  vim.ui.input({ prompt = "Parameter name (Root.…): " }, function(name)
+    if not name or name == "" then
+      return
+    end
+    vim.ui.select(TYPES, { prompt = "Storage type" }, function(ty)
+      if not ty then
+        return
+      end
+      vim.ui.input({ prompt = "Unit (optional): " }, function(unit)
+        if unit == nil then
+          return
+        end
+        vim.ui.select(
+          { "(none)", unpack(SECURITY) },
+          { prompt = "Security" },
+          function(sec)
+            if not sec then
+              return
+            end
+            local args = { "create-parameter", "--name", name }
+            if ty ~= "(none)" then
+              vim.list_extend(args, { "--type", ty })
+            end
+            if unit ~= "" then
+              vim.list_extend(args, { "--unit", unit })
+            end
+            if sec ~= "(none)" then
+              vim.list_extend(args, { "--security", sec })
+            end
+            run(cfg, args, "created parameter " .. name)
+          end
+        )
+      end)
+    end)
+  end)
+end
+
+--- :M1CreateFunction / :M1CreateScheduledFunction — prompt for the name (#61).
+---@param scheduled boolean
+local function create_function(cfg, scheduled)
+  local verb = scheduled and "create-scheduled-function" or "create-function"
+  vim.ui.input({ prompt = "Function name (Root.…): " }, function(name)
+    if not name or name == "" then
+      return
+    end
+    run(
+      cfg,
+      { verb, "--name", name },
+      "created " .. (scheduled and "scheduled " or "") .. "function " .. name
+    )
+  end)
+end
+
+function M.create_function(cfg)
+  create_function(cfg, false)
+end
+
+function M.create_scheduled_function(cfg)
+  create_function(cfg, true)
+end
+
+--- :M1SetQuantity — prompt for component (unless given) + physical quantity (#61).
+---@param component? string
+function M.set_quantity(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Quantity (e.g. Angular Speed): " }, function(qty)
+      if not qty or qty == "" then
+        return
+      end
+      run(
+        cfg,
+        { "set-quantity", "--component", comp, "--quantity", qty },
+        comp .. " quantity -> " .. qty
+      )
+    end)
+  end)
+end
+
+--- :M1SetValidation — MinMax bounds or None; the in-editor remedy for T043 (#61).
+---@param component? string
+function M.set_validation(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.select({ "MinMax", "None" }, { prompt = "Validation" }, function(ty)
+      if not ty then
+        return
+      end
+      if ty == "None" then
+        run(
+          cfg,
+          { "set-validation", "--component", comp, "--type", "None" },
+          comp .. " validation cleared"
+        )
+        return
+      end
+      vim.ui.input({ prompt = "Min: " }, function(min)
+        if not min or min == "" then
+          return
+        end
+        vim.ui.input({ prompt = "Max: " }, function(max)
+          if not max or max == "" then
+            return
+          end
+          run(
+            cfg,
+            { "set-validation", "--component", comp, "--min", min, "--max", max },
+            comp .. " validation -> [" .. min .. ", " .. max .. "]"
+          )
+        end)
+      end)
+    end)
+  end)
+end
+
+--- :M1SetFormat — display format string (#61).
+---@param component? string
+function M.set_format(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Format (e.g. %.1f): " }, function(fmt)
+      if not fmt or fmt == "" then
+        return
+      end
+      run(
+        cfg,
+        { "set-format", "--component", comp, "--format", fmt },
+        comp .. " format -> " .. fmt
+      )
+    end)
+  end)
+end
+
+--- :M1SetDps — display decimal places (#61).
+---@param component? string
+function M.set_dps(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Decimal places: " }, function(dps)
+      if not dps or dps == "" then
+        return
+      end
+      run(
+        cfg,
+        { "set-dps", "--component", comp, "--dps", dps },
+        comp .. " dps -> " .. dps
+      )
+    end)
+  end)
+end
+
+--- :M1SetDisplayRange — display min/max (#61).
+---@param component? string
+function M.set_display_range(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Display min: " }, function(min)
+      if not min or min == "" then
+        return
+      end
+      vim.ui.input({ prompt = "Display max: " }, function(max)
+        if not max or max == "" then
+          return
+        end
+        run(
+          cfg,
+          { "set-display-range", "--component", comp, "--min", min, "--max", max },
+          comp .. " display range -> [" .. min .. ", " .. max .. "]"
+        )
+      end)
+    end)
+  end)
+end
+
+--- :M1AddTag / :M1RemoveTag — the in-editor remedy for the T092 tags audit (#61).
+---@param component? string
+function M.add_tag(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Tag (e.g. System/Type tag name): " }, function(tag)
+      if not tag or tag == "" then
+        return
+      end
+      run(
+        cfg,
+        { "add-tag", "--component", comp, "--tag", tag },
+        comp .. " +tag " .. tag
+      )
+    end)
+  end)
+end
+
+---@param component? string
+function M.remove_tag(cfg, component)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = "Tag to remove: " }, function(tag)
+      if not tag or tag == "" then
+        return
+      end
+      run(
+        cfg,
+        { "remove-tag", "--component", comp, "--tag", tag },
+        comp .. " -tag " .. tag
+      )
+    end)
+  end)
+end
+
 return M
