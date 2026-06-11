@@ -26,7 +26,10 @@ end
 
 --- Tell the running m1-lsp client(s) the project file changed so they reload it,
 --- without a full restart. (The server reloads `.m1prj` on a watched-file change.)
-local function notify_reload(prj)
+--- Public so telescope-m1.nvim's call_rates picker can reuse it instead of
+--- duplicating the notification shape (telescope-m1.nvim#19).
+---@param prj string  Path to the Project.m1prj that changed.
+function M.notify_reload(prj)
   local name = require("nvim-m1.lsp").client_name
   local uri = vim.uri_from_fname(prj)
   for _, client in ipairs(vim.lsp.get_clients({ name = name })) do
@@ -62,7 +65,7 @@ local function run(cfg, args, ok_msg)
     vim.notify("nvim-m1: m1-project failed: " .. out, vim.log.levels.ERROR)
     return
   end
-  notify_reload(prj)
+  M.notify_reload(prj)
   vim.notify("nvim-m1: " .. ok_msg)
 end
 
@@ -326,7 +329,7 @@ function M.rename_component(cfg, component)
           )
           return
         end
-        notify_reload(prj)
+        M.notify_reload(prj)
         local warn = vim.trim(res.stderr or "")
         if warn ~= "" then
           vim.notify(
