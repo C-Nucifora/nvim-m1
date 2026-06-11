@@ -8,6 +8,29 @@ local warn = h.warn or h.report_warn
 local err = h.error or h.report_error
 local info = h.info or h.report_info
 
+--- Classify a bundled tool's installed version against the pinned version (#70).
+--- Pure (no vim.health calls) so it is unit-testable; check() renders the verdict.
+--- `have` is the install-manifest entry (nil if none), `bundled` whether the
+--- binary is on disk. Same equality the self-heal's stale_tools() uses.
+---@param tool string
+---@param want string   pinned version (vX.Y.Z)
+---@param have string?  installed version from the manifest, or nil
+---@param bundled boolean  whether the bundled binary exists on disk
+---@return "ok"|"warn"|"info" level, string msg
+function M.version_status(tool, want, have, bundled)
+  if have == want then
+    return "ok", tool .. " " .. want
+  elseif have then
+    return "warn",
+      ("%s %s installed, %s pinned — run :M1Update"):format(tool, have, want)
+  elseif bundled then
+    return "warn",
+      ("%s installed but unversioned, %s pinned — run :M1Update"):format(tool, want)
+  else
+    return "info", tool .. " not bundled by nvim-m1 (pinned: " .. want .. ")"
+  end
+end
+
 function M.check()
   local nvim_m1 = require("nvim-m1")
   local cfg = nvim_m1.config or require("nvim-m1.config").defaults
@@ -65,6 +88,22 @@ function M.check()
   else
     warn(perr or "unsupported platform for prebuilt binaries")
   end
+  -- Compare the on-disk bundled binaries against the pinned versions (#70). The
+  -- self-heal already diffs these on the first M1 open, but it can't run when
+  -- offline, a download failed, or the binaries are user-managed — leaving
+  -- :checkhealth as the only place a maintainer sees that the running toolchain
+  -- trails the pin (the stale-binary situation behind stale-hover bug reports).
+  -- Same comparison stale_tools() uses: the manifest records each bundled
+  -- install at the pinned `vX.Y.Z` string, so an equality check is exact.
+  local installed = install.installed_versions()
+  local report = { ok = ok, warn = warn, info = info }
+  for _, tool in ipairs(install.tools) do
+    local bundled = vim.fn.executable(install.tool_path(tool)) == 1
+    local level, msg =
+      M.version_status(tool, install.versions[tool], installed[tool], bundled)
+    report[level](msg)
+  end
+
   -- macOS: the downloaded binary is re-signed ad-hoc on install (the released
   -- asset's signature is killed by AMFI on Apple Silicon); that needs codesign.
   if install.needs_resign() then
