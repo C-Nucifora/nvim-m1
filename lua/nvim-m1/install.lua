@@ -30,9 +30,9 @@ local M = {}
 --- m1-vscode's `package.json` `serverVersion` pin.
 M.versions = {
   ["m1-lsp"] = "v0.36.0",
-  ["m1-fmt"] = "v0.11.0",
-  ["m1-lint"] = "v0.16.0",
-  ["m1-project"] = "v0.4.0",
+  ["m1-fmt"] = "v0.11.1",
+  ["m1-lint"] = "v0.17.0",
+  ["m1-project"] = "v0.5.0",
 }
 
 --- The GitHub repo each tool's release binaries come from.
