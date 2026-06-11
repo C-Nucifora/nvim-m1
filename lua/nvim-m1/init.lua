@@ -190,6 +190,39 @@ local function user_commands()
     project.validate(M.config or config.defaults)
   end, { desc = "nvim-m1: validate Project.m1prj into the quickfix list (m1-project)" })
 
+  -- #61: the remaining m1-project v0.4.0 verbs.
+  local function proj_cmd(name, fn, desc)
+    vim.api.nvim_create_user_command(name, function()
+      project[fn](M.config or config.defaults)
+    end, { desc = "nvim-m1: " .. desc .. " (m1-project)" })
+  end
+  proj_cmd(
+    "M1CreateParameter",
+    "create_parameter",
+    "create a parameter in Project.m1prj"
+  )
+  proj_cmd(
+    "M1CreateFunction",
+    "create_function",
+    "create a (calculate-on-demand) function"
+  )
+  proj_cmd(
+    "M1CreateScheduledFunction",
+    "create_scheduled_function",
+    "create a scheduled function"
+  )
+  proj_cmd("M1SetQuantity", "set_quantity", "set a component's physical quantity")
+  proj_cmd(
+    "M1SetValidation",
+    "set_validation",
+    "set a parameter's validation bounds (T043 remedy)"
+  )
+  proj_cmd("M1SetFormat", "set_format", "set a component's display format")
+  proj_cmd("M1SetDps", "set_dps", "set a component's display decimal places")
+  proj_cmd("M1SetDisplayRange", "set_display_range", "set a component's display range")
+  proj_cmd("M1AddTag", "add_tag", "add a System/Type tag to a component (T092 remedy)")
+  proj_cmd("M1RemoveTag", "remove_tag", "remove a tag from a component")
+
   vim.api.nvim_create_user_command(
     "M1Install",
     function()

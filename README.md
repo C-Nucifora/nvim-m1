@@ -103,6 +103,10 @@ with all defaults via `:M1GenerateConfig`.
 | `:M1RenameComponent` | Rename a component (picked from the project) and update its trigger references; warns when a backing `.m1scr` file may need renaming too. |
 | `:M1DeleteComponent` | Delete a component (picked from the project, confirms first; optional subtree). |
 | `:M1ValidateProject` | Validate `Project.m1prj` structure into the quickfix list. |
+| `:M1CreateParameter` / `:M1CreateFunction` / `:M1CreateScheduledFunction` | Create a parameter / function / scheduled function in `Project.m1prj`. |
+| `:M1SetValidation` | Set (or clear) a parameter's MinMax validation bounds — the in-editor remedy for T043. |
+| `:M1SetQuantity` / `:M1SetFormat` / `:M1SetDps` / `:M1SetDisplayRange` | Set a component's physical quantity / display format / decimal places / display range. |
+| `:M1AddTag` / `:M1RemoveTag` | Add or remove a System/Type tag — the in-editor remedy for the T092 tags audit. |
 | `:M1Install` / `:M1Update` | Download the bundled M1 toolchain at the pinned versions. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 

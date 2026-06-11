@@ -17,6 +17,63 @@ describe("nvim-m1.project", function()
     assert.is_not_nil(cmds.M1CreateChannel)
     assert.is_not_nil(cmds.M1SetSecurity)
     assert.is_not_nil(cmds.M1SetCallRate)
+    -- #61: the remaining m1-project v0.4.0 verbs.
+    for _, name in ipairs({
+      "M1CreateParameter",
+      "M1CreateFunction",
+      "M1CreateScheduledFunction",
+      "M1SetQuantity",
+      "M1SetValidation",
+      "M1SetFormat",
+      "M1SetDps",
+      "M1SetDisplayRange",
+      "M1AddTag",
+      "M1RemoveTag",
+    }) do
+      assert.is_not_nil(cmds[name], name .. " registered")
+    end
+  end)
+
+  -- End-to-end (#61): set_validation drives the real CLI and writes MinMax
+  -- bounds into the .m1prj — the in-editor remedy for T043.
+  it("set_validation writes MinMax bounds via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Parameter" Name="Root.Engine.Gain"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Engine.Gain", "0", "10" }
+    local selects = { "MinMax" }
+    local orig_input, orig_select = vim.ui.input, vim.ui.select
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    vim.ui.select = function(_, _, cb)
+      cb(table.remove(selects, 1))
+    end
+    local okp = pcall(function()
+      project.set_validation(require("nvim-m1.config").resolve())
+    end)
+    vim.ui.input, vim.ui.select = orig_input, orig_select
+    assert.is_true(okp)
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find("Validation", 1, true),
+      "validation written:\n" .. written
+    )
   end)
 
   -- End-to-end: with the real m1-project binary on $PATH, the create-channel
