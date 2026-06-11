@@ -32,3 +32,36 @@ describe("nvim-m1.codelens", function()
     assert.equals(3, vim.api.nvim_win_get_cursor(0)[1])
   end)
 end)
+
+describe("nvim-m1.codelens refresh shim (#66)", function()
+  local codelens = require("nvim-m1.codelens")
+
+  it("prefers vim.lsp.codelens.enable over the deprecated refresh (0.12+)", function()
+    local saved_enable, saved_refresh =
+      vim.lsp.codelens.enable, vim.lsp.codelens.refresh
+    local enabled, refreshed = 0, 0
+    vim.lsp.codelens.enable = function()
+      enabled = enabled + 1
+    end
+    vim.lsp.codelens.refresh = function()
+      refreshed = refreshed + 1
+    end
+    codelens._refresh_buf(0)
+    vim.lsp.codelens.enable, vim.lsp.codelens.refresh = saved_enable, saved_refresh
+    assert.equals(1, enabled)
+    assert.equals(0, refreshed)
+  end)
+
+  it("falls back to refresh when enable is unavailable (0.10/0.11)", function()
+    local saved_enable, saved_refresh =
+      vim.lsp.codelens.enable, vim.lsp.codelens.refresh
+    local refreshed = 0
+    vim.lsp.codelens.enable = nil
+    vim.lsp.codelens.refresh = function()
+      refreshed = refreshed + 1
+    end
+    codelens._refresh_buf(0)
+    vim.lsp.codelens.enable, vim.lsp.codelens.refresh = saved_enable, saved_refresh
+    assert.equals(1, refreshed)
+  end)
+end)

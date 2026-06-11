@@ -147,20 +147,20 @@ describe("nvim-m1.install", function()
     end
 
     before_each(function()
-      saved_fetch = install.fetch
+      saved_fetch = install.fetch_async
       saved_notify = vim.notify
       vim.notify = function() end
       vim.fn.delete(install.bin_dir(), "rf")
     end)
     after_each(function()
-      install.fetch = saved_fetch
+      install.fetch_async = saved_fetch
       vim.notify = saved_notify
       vim.fn.delete(install.bin_dir(), "rf")
     end)
 
     it("install() records the versions it installed in a manifest", function()
-      install.fetch = function()
-        return true
+      install.fetch_async = function(_, cb)
+        cb(true)
       end -- no network
       install.install({ "m1-lint", "m1-project" })
       local v = install.installed_versions()
@@ -169,13 +169,69 @@ describe("nvim-m1.install", function()
     end)
 
     it("install() does not record a tool whose download failed", function()
-      install.fetch = function(tool)
-        return tool ~= "m1-lint", "boom"
+      install.fetch_async = function(tool, cb)
+        cb(tool ~= "m1-lint", "boom")
       end
       install.install({ "m1-lint", "m1-project" })
       local v = install.installed_versions()
       assert.is_nil(v["m1-lint"])
       assert.equals(install.versions["m1-project"], v["m1-project"])
+    end)
+
+    it("install_async() runs downloads without blocking the event loop", function()
+      -- The self-heal schedules this on the UI thread at the first .m1scr
+      -- open; a synchronous download froze the editor for the whole
+      -- curl + attestation round-trip (#65). Fake vim.system completes each
+      -- "download" 40ms later via the loop; a 5ms timer must still fire
+      -- while the install is in flight, and install_async must return
+      -- before anything completes.
+      local saved_system, saved_exepath = vim.system, vim.fn.exepath
+      vim.fn.exepath = function(name)
+        if name == "curl" then
+          return "/usr/bin/curl"
+        end
+        return "" -- no gh => attestation degrades to warn-and-proceed
+      end
+      vim.system = function(cmd, _, on_exit)
+        for i, a in ipairs(cmd) do
+          if a == "-o" then -- create the artifact like curl -o would
+            local f = io.open(cmd[i + 1], "w")
+            f:write("x")
+            f:close()
+          end
+        end
+        vim.defer_fn(function()
+          on_exit({ code = 0, stdout = "", stderr = "" })
+        end, 40)
+      end
+
+      local marker_at, done_at
+      vim.defer_fn(function()
+        marker_at = vim.uv.hrtime()
+      end, 5)
+      install.install_async({ "m1-lint" }, function(ok)
+        assert.is_true(ok)
+        done_at = vim.uv.hrtime()
+      end)
+      local returned_before_done = done_at == nil
+      vim.wait(2000, function()
+        return done_at ~= nil
+      end, 10)
+      vim.system, vim.fn.exepath = saved_system, saved_exepath
+
+      assert.is_true(
+        returned_before_done,
+        "install_async must return before the download completes"
+      )
+      assert.is_truthy(done_at, "install_async never completed")
+      assert.is_truthy(
+        marker_at,
+        "timer starved: the event loop was blocked during the install"
+      )
+      assert.is_true(
+        marker_at < done_at,
+        "the timer must fire while the download is in flight"
+      )
     end)
 
     it("installed_versions() is empty when nothing has been installed", function()

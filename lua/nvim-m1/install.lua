@@ -126,16 +126,24 @@ end
 ---@param path string  Path to the downloaded artifact.
 ---@param repo string  `owner/name` the asset was downloaded from.
 ---@return boolean ok, string? err
+local judge_attestation -- forward declaration (defined below attest_verify)
+
+--- WARN that gh is absent so provenance cannot be checked (shared notify).
+---@param repo string
+local function notify_no_gh(repo)
+  vim.notify(
+    ("nvim-m1: gh CLI not found — skipping build-provenance verification of %s. "):format(
+      repo
+    )
+      .. "Install GitHub CLI (https://cli.github.com) to verify downloaded binaries.",
+    vim.log.levels.WARN
+  )
+end
+
 function M.attest_verify(path, repo)
   local gh = vim.fn.exepath("gh")
   if gh == "" then
-    vim.notify(
-      ("nvim-m1: gh CLI not found — skipping build-provenance verification of %s. "):format(
-        repo
-      )
-        .. "Install GitHub CLI (https://cli.github.com) to verify downloaded binaries.",
-      vim.log.levels.WARN
-    )
+    notify_no_gh(repo)
     return true
   end
 
@@ -143,7 +151,47 @@ function M.attest_verify(path, repo)
   -- interpolated into a shell string, so no quoting/injection is possible even
   -- if a value contained shell metacharacters.
   local out = vim.fn.system({ gh, "attestation", "verify", path, "--repo", repo })
-  if vim.v.shell_error == 0 then
+  return judge_attestation(vim.v.shell_error, out, path, repo)
+end
+
+--- Async [`M.attest_verify`]: the `gh attestation verify` network round-trip
+--- runs off the UI thread; `cb(ok, err?)` is invoked on the main loop with the
+--- same verdict the sync form returns (#65).
+---@param path string
+---@param repo string
+---@param cb fun(ok: boolean, err?: string)
+function M.attest_verify_async(path, repo, cb)
+  local gh = vim.fn.exepath("gh")
+  if gh == "" then
+    notify_no_gh(repo)
+    return cb(true)
+  end
+  vim.system(
+    { gh, "attestation", "verify", path, "--repo", repo },
+    { text = true },
+    function(res)
+      vim.schedule(function()
+        cb(
+          judge_attestation(
+            res.code,
+            (res.stdout or "") .. (res.stderr or ""),
+            path,
+            repo
+          )
+        )
+      end)
+    end
+  )
+end
+
+--- Interpret a finished `gh attestation verify` run (shared by the sync and
+--- async paths). Exit 0 verifies; otherwise distinguish "can't verify"
+--- (warn + proceed) from "verified WRONG" (abort).
+---@param code integer  gh's exit code
+---@param out string    gh's combined output
+---@return boolean ok, string? err
+function judge_attestation(code, out, path, repo)
+  if code == 0 then
     return true
   end
 
@@ -223,24 +271,26 @@ local function resign(path)
   return true
 end
 
---- Download one tool's pinned release binary into `bin_dir()` (re-signing it
---- ad-hoc on macOS so it will run). Exposed on `M` so tests can stub the actual
---- download.
+--- Download one tool's pinned release binary into `bin_dir()` asynchronously
+--- (re-signing it ad-hoc on macOS so it will run). The curl download and the
+--- `gh attestation verify` round-trip both run off the UI thread; `cb(ok, err?)`
+--- is invoked on the main loop (#65). Exposed on `M` so tests can stub the
+--- actual download.
 ---@param tool string
----@return boolean ok, string? err
-function M.fetch(tool)
+---@param cb fun(ok: boolean, err?: string)
+function M.fetch_async(tool, cb)
   local triple, suffix, err = M.platform()
   if not triple then
-    return false, err
+    return cb(false, err)
   end
   local version, repo = M.versions[tool], M.repos[tool]
   if not (version and repo) then
-    return false, "unknown tool: " .. tostring(tool)
+    return cb(false, "unknown tool: " .. tostring(tool))
   end
 
   local curl = vim.fn.exepath("curl")
   if curl == "" then
-    return false, "curl not found on $PATH (needed to download the M1 toolchain)"
+    return cb(false, "curl not found on $PATH (needed to download the M1 toolchain)")
   end
 
   vim.fn.mkdir(M.bin_dir(), "p")
@@ -252,28 +302,44 @@ function M.fetch(tool)
   )
   local dest = M.bin_dir() .. "/" .. tool .. suffix
 
-  local res = vim.fn.system({ curl, "-fSL", "--retry", "2", "-o", dest, url })
-  if vim.v.shell_error ~= 0 then
-    return false,
-      ("failed to download %s %s\n  %s\n  %s"):format(tool, version, url, res)
-  end
-
-  -- Verify build provenance BEFORE making the artifact executable or running it,
-  -- so a tampered/substituted asset is rejected at rest (it never gets +x). (#21)
-  local vok, verr = M.attest_verify(dest, repo)
-  if not vok then
-    os.remove(dest)
-    return false, verr
-  end
-
-  if suffix == "" then
-    vim.fn.system({ "chmod", "+x", dest })
-  end
-  local rok, rerr = resign(dest)
-  if not rok then
-    return false, rerr
-  end
-  return true
+  vim.system(
+    { curl, "-fSL", "--retry", "2", "-o", dest, url },
+    { text = true },
+    function(res)
+      if res.code ~= 0 then
+        return vim.schedule(function()
+          cb(
+            false,
+            ("failed to download %s %s\n  %s\n  %s"):format(
+              tool,
+              version,
+              url,
+              res.stderr or ""
+            )
+          )
+        end)
+      end
+      vim.schedule(function()
+        -- Verify build provenance BEFORE making the artifact executable or
+        -- running it, so a tampered/substituted asset is rejected at rest (it
+        -- never gets +x). (#21)
+        M.attest_verify_async(dest, repo, function(vok, verr)
+          if not vok then
+            os.remove(dest)
+            return cb(false, verr)
+          end
+          if suffix == "" then
+            vim.uv.fs_chmod(dest, 493) -- 0755: the verified artifact may now run
+          end
+          local rok, rerr = resign(dest)
+          if not rok then
+            return cb(false, rerr)
+          end
+          cb(true)
+        end)
+      end)
+    end
+  )
 end
 
 --- Path of the install manifest: a JSON `{ tool = version }` record of what
@@ -332,35 +398,72 @@ function M.stale_tools()
   return stale
 end
 
---- Install (download) the bundled M1 toolchain. Safe to re-run; overwrites with
---- the pinned versions and records them in the manifest.
+--- Install (download) the bundled M1 toolchain without blocking the editor:
+--- the tools download sequentially off the UI thread, the manifest records
+--- what landed, and `on_done(ok)` fires on the main loop when the last tool
+--- finishes. This is the path the first-open self-heal and :M1Install use —
+--- the old synchronous download froze the UI for the whole curl + attestation
+--- round-trip of every stale tool (#65). Safe to re-run; overwrites with the
+--- pinned versions.
 ---@param tools? string[]  Subset to install (default: all of `M.tools`).
----@return boolean ok
-function M.install(tools)
+---@param on_done? fun(ok: boolean)
+function M.install_async(tools, on_done)
   tools = tools or M.tools
   local triple, _, err = M.platform()
   if not triple then
     vim.notify("nvim-m1: " .. tostring(err), vim.log.levels.ERROR)
-    return false
+    if on_done then
+      on_done(false)
+    end
+    return
   end
 
   local manifest = M.installed_versions()
   local all_ok = true
-  for _, tool in ipairs(tools) do
-    vim.notify(("nvim-m1: installing %s %s…"):format(tool, M.versions[tool]))
-    local ok, ferr = M.fetch(tool)
-    if ok then
-      manifest[tool] = M.versions[tool] -- record only what landed on disk
-    else
-      all_ok = false
-      vim.notify("nvim-m1: " .. tostring(ferr), vim.log.levels.ERROR)
+  local i = 0
+  local function step()
+    i = i + 1
+    local tool = tools[i]
+    if not tool then
+      write_manifest(manifest)
+      if all_ok then
+        vim.notify("nvim-m1: toolchain installed into " .. M.bin_dir())
+      end
+      if on_done then
+        on_done(all_ok)
+      end
+      return
     end
+    vim.notify(("nvim-m1: installing %s %s…"):format(tool, M.versions[tool]))
+    M.fetch_async(tool, function(ok, ferr)
+      if ok then
+        manifest[tool] = M.versions[tool] -- record only what landed on disk
+      else
+        all_ok = false
+        vim.notify("nvim-m1: " .. tostring(ferr), vim.log.levels.ERROR)
+      end
+      step()
+    end)
   end
-  write_manifest(manifest)
-  if all_ok then
-    vim.notify("nvim-m1: toolchain installed into " .. M.bin_dir())
-  end
-  return all_ok
+  step()
+end
+
+--- Blocking wrapper over [`M.install_async`] for contexts that must not return
+--- until the toolchain is on disk: the lazy.nvim `build` hook and headless
+--- scripting. `vim.wait` pumps the event loop, so the async chain progresses
+--- while we wait. Interactive code paths (self-heal, :M1Install) use
+--- install_async directly instead.
+---@param tools? string[]  Subset to install (default: all of `M.tools`).
+---@return boolean ok
+function M.install(tools)
+  local result
+  M.install_async(tools, function(ok)
+    result = ok
+  end)
+  vim.wait(10 * 60 * 1000, function()
+    return result ~= nil
+  end, 50)
+  return result == true
 end
 
 return M

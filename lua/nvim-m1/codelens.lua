@@ -36,6 +36,21 @@ local function is_m1_codelens_client(client)
     and client.server_capabilities.codeLensProvider ~= nil
 end
 
+--- Refresh the lenses of one buffer. `vim.lsp.codelens.refresh({ bufnr })` is
+--- deprecated on 0.12 (removed in 0.13) in favour of
+--- `vim.lsp.codelens.enable(true, { bufnr })`, which does not exist on
+--- 0.10/0.11 — use whichever this Neovim provides (#66). Exposed as
+--- `M._refresh_buf` for the spec.
+---@param buf integer
+function M._refresh_buf(buf)
+  local cl = vim.lsp.codelens
+  if type(cl.enable) == "function" then
+    pcall(cl.enable, true, { bufnr = buf })
+  else
+    pcall(cl.refresh, { bufnr = buf })
+  end
+end
+
 --- Wire code-lens display + the reveal command. Idempotent (one augroup,
 --- cleared on re-setup). No-op when `cfg.codelens` is false.
 ---@param cfg NvimM1Config
@@ -58,13 +73,13 @@ function M.setup(cfg)
         return
       end
       local buf = ev.buf
-      pcall(vim.lsp.codelens.refresh, { bufnr = buf })
+      M._refresh_buf(buf)
       -- Keep lenses current as the buffer is edited/navigated.
       vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "InsertLeave" }, {
         group = group,
         buffer = buf,
         callback = function()
-          pcall(vim.lsp.codelens.refresh, { bufnr = buf })
+          M._refresh_buf(buf)
         end,
       })
       vim.api.nvim_buf_create_user_command(buf, "M1CodeLensRun", function()
