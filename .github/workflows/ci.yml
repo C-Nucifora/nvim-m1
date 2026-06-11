@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs of the same branch/PR: every push otherwise queues
+# a full duplicate job matrix (m1-tools#27).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   stylua:
     name: Lua Format
