@@ -213,6 +213,109 @@ describe("nvim-m1 next-gen additions", function()
     assert.is_not_nil(cmds.M1ValidateProject)
   end)
 
+  it("registers M1CreateConstant and M1CreateTable (#76)", function()
+    require("nvim-m1").setup()
+    local cmds = vim.api.nvim_get_commands({})
+    assert.is_not_nil(cmds.M1CreateConstant)
+    assert.is_not_nil(cmds.M1CreateTable)
+  end)
+
+  -- End-to-end (#76): create-constant writes a BuiltIn.Constant.
+  it("create_constant adds a constant via the real binary (#76)", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local project = require("nvim-m1.project")
+    local config = require("nvim-m1.config")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Eng"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Eng.K", "42" } -- name, value
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    local okp = pcall(function()
+      project.create_constant(config.resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "create_constant did not finish"
+    )
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find('Name="Root.Eng.K"', 1, true),
+      "constant inserted:\n" .. written
+    )
+    assert.is_truthy(
+      written:find("BuiltIn.Constant", 1, true),
+      "as a Constant:\n" .. written
+    )
+  end)
+
+  -- End-to-end (#76): create-table writes a BuiltIn.Table with an axis source.
+  it("create_table adds a 1-axis table via the real binary (#76)", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local project = require("nvim-m1.project")
+    local config = require("nvim-m1.config")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Eng"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Eng.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    -- name (input), axis-x (select via pick_component), Y-axis blank (input).
+    local inputs = { "Root.Eng.Map", "" }
+    local orig_input, orig_select = vim.ui.input, vim.ui.select
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    vim.ui.select = function(_, _, cb)
+      cb("Root.Eng.Speed")
+    end
+    local okp = pcall(function()
+      project.create_table(config.resolve())
+    end)
+    vim.ui.input, vim.ui.select = orig_input, orig_select
+    assert.is_true(okp)
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "create_table did not finish"
+    )
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find('Name="Root.Eng.Map"', 1, true),
+      "table inserted:\n" .. written
+    )
+    assert.is_truthy(written:find("BuiltIn.Table", 1, true), "as a Table:\n" .. written)
+  end)
+
   -- End-to-end (#51): with the real binary, create-group edits the file and
   -- validate fills the quickfix list without errors.
   it("create_group + validate drive the real binary (#51)", function()
