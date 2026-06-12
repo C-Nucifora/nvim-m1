@@ -383,3 +383,54 @@ describe("nvim-m1 next-gen additions", function()
     assert.is_false(require("nvim-m1.whichkey").register())
   end)
 end)
+
+describe("nvim-m1.project.set_call_rate_for (#26 in telescope-m1.nvim)", function()
+  local project = require("nvim-m1.project")
+
+  it("is a public function for picker delegation", function()
+    assert.is_function(project.set_call_rate_for)
+  end)
+
+  it("sets a script's call rate through the serialized runner", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.MethodUser" Name="Root.Engine.Update"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Events"/>',
+      '  <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 100Hz"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local done_ok
+    -- "100Hz" exercises the case-insensitive Hz normalisation.
+    project.set_call_rate_for(
+      require("nvim-m1.config").resolve(),
+      "Root.Engine.Update",
+      "100Hz",
+      {
+        on_done = function(ok)
+          done_ok = ok
+        end,
+      }
+    )
+    assert.is_true(
+      vim.wait(5000, function()
+        return done_ok ~= nil and project.is_idle()
+      end),
+      "set_call_rate_for did not finish within 5s"
+    )
+    assert.is_true(done_ok, "mutation must succeed")
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(written:find("100Hz", 1, true), "call rate written:\n" .. written)
+  end)
+end)
