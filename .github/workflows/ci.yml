@@ -60,24 +60,39 @@ jobs:
           repository: C-Nucifora/tree-sitter-m1
           path: deps/tree-sitter-m1
 
-      - name: Install m1 toolchain binaries (best-effort, enables e2e specs)
-        continue-on-error: true
+      # The e2e specs run against the SAME pinned, provenance-verified
+      # toolchain users get (#83): versions/repos are read from
+      # lua/nvim-m1/install.lua (the single source of truth), every download
+      # is attestation-verified, and any failure fails the job — a silent
+      # skip used to turn e2e coverage off while staying green.
+      - name: Install m1 toolchain binaries (pinned, verified - e2e specs)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           mkdir -p "$HOME/.local/bin"
-          for tool in m1-lint m1-fmt m1-lsp; do
-            gh release download --repo "C-Nucifora/$tool" \
-              --pattern "$tool-x86_64-unknown-linux-gnu" \
-              -O "$HOME/.local/bin/$tool" 2>/dev/null \
-              && chmod +x "$HOME/.local/bin/$tool" || true
+          pin() { # pin <tool> <file-section regex> -> first quoted value for the tool key
+            sed -n "s/^  \\[\"$1\"\\] = \"\\([^\"]*\\)\",\\?$/\\1/p" lua/nvim-m1/install.lua
+          }
+          for tool in m1-lsp m1-fmt m1-lint m1-project; do
+            version=$(pin "$tool" | sed -n 1p)
+            repo=$(pin "$tool" | sed -n 2p)
+            if [ -z "$version" ] || [ -z "$repo" ]; then
+              echo "::error::could not read pin/repo for $tool from install.lua"; exit 1
+            fi
+            asset="$tool-x86_64-unknown-linux-gnu"
+            gh release download "$version" --repo "$repo" \
+              --pattern "$asset" -O "$HOME/.local/bin/$tool" --clobber
+            if out=$(gh attestation verify "$HOME/.local/bin/$tool" --repo "$repo" 2>&1); then
+              echo "verified $tool $version ($repo)"
+            else
+              echo "::error::provenance verification failed for $tool $version"
+              printf '%s\n' "$out"
+              exit 1
+            fi
+            chmod +x "$HOME/.local/bin/$tool"
+            "$HOME/.local/bin/$tool" --version || true
           done
-          # m1-project lives under nedlane/ — its e2e create-channel spec runs
-          # only when the binary is present (skips otherwise).
-          gh release download --repo "nedlane/m1-project" \
-            --pattern "m1-project-x86_64-unknown-linux-gnu" \
-            -O "$HOME/.local/bin/m1-project" 2>/dev/null \
-            && chmod +x "$HOME/.local/bin/m1-project" || true
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run tests

@@ -186,6 +186,21 @@ describe("nvim-m1.install", function()
       -- while the install is in flight, and install_async must return
       -- before anything completes.
       local saved_system, saved_exepath = vim.system, vim.fn.exepath
+      -- Skip the Darwin re-sign step: this test is about event-loop
+      -- scheduling, and the exepath stub below hides codesign, which on a
+      -- macOS contributor machine made the install fail (#82). The real
+      -- missing-codesign failure path has its own test below.
+      local saved_resign = install.needs_resign
+      install.needs_resign = function()
+        return false
+      end
+      local errors = {}
+      local saved_notify = vim.notify
+      vim.notify = function(msg, level)
+        if level == vim.log.levels.ERROR then
+          errors[#errors + 1] = tostring(msg)
+        end
+      end
       vim.fn.exepath = function(name)
         if name == "curl" then
           return "/usr/bin/curl"
@@ -218,12 +233,17 @@ describe("nvim-m1.install", function()
         return done_at ~= nil
       end, 10)
       vim.system, vim.fn.exepath = saved_system, saved_exepath
+      install.needs_resign, vim.notify = saved_resign, saved_notify
 
       assert.is_true(
         returned_before_done,
         "install_async must return before the download completes"
       )
-      assert.is_truthy(done_at, "install_async never completed")
+      assert.is_truthy(
+        done_at,
+        "install_async never completed; installer errors: "
+          .. table.concat(errors, "; ")
+      )
       assert.is_truthy(
         marker_at,
         "timer starved: the event loop was blocked during the install"
@@ -231,6 +251,57 @@ describe("nvim-m1.install", function()
       assert.is_true(
         marker_at < done_at,
         "the timer must fire while the download is in flight"
+      )
+    end)
+
+    it("fails clearly when macOS needs codesign and it is missing (#82)", function()
+      -- Forces the Darwin re-sign path on every platform: needs_resign()
+      -- stubbed true, exepath hides codesign. The install must complete with
+      -- ok=false and an error naming codesign — not hang or succeed.
+      local saved_system, saved_exepath = vim.system, vim.fn.exepath
+      local saved_resign, saved_notify = install.needs_resign, vim.notify
+      install.needs_resign = function()
+        return true
+      end
+      local errors = {}
+      vim.notify = function(msg, level)
+        if level == vim.log.levels.ERROR then
+          errors[#errors + 1] = tostring(msg)
+        end
+      end
+      vim.fn.exepath = function(name)
+        if name == "curl" then
+          return "/usr/bin/curl"
+        end
+        return "" -- no gh, and crucially no codesign
+      end
+      vim.system = function(cmd, _, on_exit)
+        for i, a in ipairs(cmd) do
+          if a == "-o" then
+            local f = io.open(cmd[i + 1], "w")
+            f:write("x")
+            f:close()
+          end
+        end
+        vim.defer_fn(function()
+          on_exit({ code = 0, stdout = "", stderr = "" })
+        end, 5)
+      end
+
+      local got_ok
+      install.install_async({ "m1-lint" }, function(ok)
+        got_ok = ok
+      end)
+      vim.wait(2000, function()
+        return got_ok ~= nil
+      end, 10)
+      vim.system, vim.fn.exepath = saved_system, saved_exepath
+      install.needs_resign, vim.notify = saved_resign, saved_notify
+
+      assert.is_false(got_ok, "missing codesign must fail the install")
+      assert.is_true(
+        table.concat(errors, "; "):find("codesign") ~= nil,
+        "the error must name codesign, got: " .. table.concat(errors, "; ")
       )
     end)
 
