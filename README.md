@@ -1,36 +1,29 @@
 # nvim-m1
 
-Neovim plugin for [M1 script](https://github.com/C-Nucifora/m1-tools) (`.m1scr`). Provides LSP, tree-sitter highlighting, format-on-save, and standalone linting in a single `setup()` call — the Neovim equivalent of [m1-vscode](https://github.com/nedlane/m1-vscode).
+Neovim plugin for [M1 script](https://github.com/C-Nucifora/m1-tools)
+(`.m1scr`). LSP, tree-sitter highlighting, format-on-save, standalone
+linting, and project-file editing in a single `setup()` call — the Neovim
+equivalent of [m1-vscode](https://github.com/nedlane/m1-vscode).
+
+**The M1 toolchain is bundled**: the install hook downloads the pinned,
+prebuilt `m1-lsp` / `m1-fmt` / `m1-lint` / `m1-project` binaries for your
+platform — there is nothing to install by hand, and `:checkhealth nvim-m1`
+verifies the result.
 
 ## Requirements
 
-- Neovim ≥ 0.10
-- [lazy.nvim](https://github.com/folke/lazy.nvim) (or any plugin manager)
-- [tree-sitter-m1](https://github.com/C-Nucifora/tree-sitter-m1) — the `m1` grammar + queries (a dependency, pulled in automatically)
-- A C compiler (`cc`/`gcc`/`clang`) on `$PATH` — the parser is compiled from tree-sitter-m1's sources on first setup
-- On Neovim 0.10: [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (0.11+ uses the native LSP API)
-- Optional: [conform.nvim](https://github.com/stevearc/conform.nvim), [nvim-lint](https://github.com/mfussenegger/nvim-lint)
-- `curl` on `$PATH` — used once to download the bundled toolchain
-- macOS only: `codesign` (ships with the Xcode Command Line Tools, alongside the C compiler
-  above) — the downloaded binaries are re-signed ad-hoc on install so Apple Silicon's
-  code-signing check doesn't kill them
-
-**The M1 toolchain is bundled** — you don't install `m1-lsp`/`m1-fmt`/`m1-lint`/`m1-project`
-yourself. The lazy.nvim `build` hook below downloads the pinned, prebuilt binaries for your
-platform into `stdpath("data")/nvim-m1/bin` on install/update (re-signing them ad-hoc on
-macOS so they run); `:M1Install` / `:M1Update` do it
-on demand. A binary you put on `$PATH` (or point to via `server_path`/`project_path`) still wins.
-`m1-lsp` alone provides diagnostics, hover, completion, formatting and rename — it embeds
-m1-fmt/m1-lint/m1-typecheck — so the LSP is the only hard requirement; the rest enable the
-conform.nvim / nvim-lint / project-editing paths. Run `:checkhealth nvim-m1` to verify.
-
-Tree-sitter highlighting works through Neovim core: nvim-m1 compiles the `m1` parser from
-tree-sitter-m1's sources into a site `parser/m1.so` and registers its queries directly, so
-it does **not** depend on a particular nvim-treesitter branch (the `main` rewrite dropped the
-runtime `:TSInstall`/`install_info` path nvim-m1 used to rely on). On Neovim 0.11+ the server
-is registered with the native `vim.lsp.config`/`vim.lsp.enable` API; on 0.10 it falls back to
-nvim-lspconfig. Format-on-save uses conform.nvim when present and otherwise falls back to LSP
-formatting; standalone lint uses nvim-lint when present and otherwise a built-in runner.
+- Neovim ≥ 0.10 (on 0.10,
+  [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) is required;
+  0.11+ uses the native LSP API)
+- A C compiler on `$PATH` — the `m1` parser is compiled from
+  [tree-sitter-m1](https://github.com/C-Nucifora/tree-sitter-m1)'s sources on
+  first setup
+- `curl` on `$PATH` — used to download the bundled toolchain (on macOS, also
+  `codesign` from the Xcode CLT: binaries are re-signed ad-hoc so Apple
+  Silicon's code-signing check doesn't kill them)
+- Optional: [conform.nvim](https://github.com/stevearc/conform.nvim) for
+  format-on-save, [nvim-lint](https://github.com/mfussenegger/nvim-lint) for
+  standalone lint — both have built-in fallbacks when absent
 
 ## Installation
 
@@ -45,89 +38,71 @@ formatting; standalone lint uses nvim-lint when present and otherwise a built-in
     { "stevearc/conform.nvim", optional = true },
     { "mfussenegger/nvim-lint", optional = true },
   },
-  -- Downloads the bundled M1 toolchain (m1-lsp/fmt/lint/project) for your
-  -- platform on install + update. Same as running :M1Install.
+  -- Downloads the bundled M1 toolchain for your platform on install/update.
+  -- Same as running :M1Install.
   build = function()
     require("nvim-m1.install").install()
   end,
   ft = { "m1scr", "m1prj" },
-  opts = {
-    -- Path to the m1-lsp binary (default: search $PATH for "m1-lsp")
-    server_path = nil,
-    -- Format .m1scr buffers on save (m1-fmt via conform.nvim, else LSP)
-    format_on_save = true,
-    -- Lint .m1scr buffers on save (m1-lint via nvim-lint, else built-in runner)
-    lint_on_save = true,
-  },
+  opts = {},
 }
 ```
+
+Binaries you provide yourself still win: anything on `$PATH` (or pointed to
+via `server_path` / `project_path`) is used over the bundled toolchain.
+Highlighting works through Neovim core — the plugin compiles and registers
+the parser itself, so it does not depend on a particular nvim-treesitter
+branch.
 
 ### Options
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `server_path` | `nil` | Path to the m1-lsp binary; `nil` searches `$PATH`. |
-| `project_path` | `nil` | Path to the m1-project binary (Project.m1prj editor; powers `:M1CreateChannel` etc.); `nil` searches `$PATH`. |
+| `project_path` | `nil` | Path to the m1-project binary (powers `:M1CreateChannel` etc.); `nil` searches `$PATH`. |
 | `format_on_save` | `true` | Format `.m1scr` on write with m1-fmt. |
 | `lint_on_save` | `true` | Lint `.m1scr` on write with m1-lint. |
 | `filetypes` | `{ "m1scr" }` | Script filetypes to wire. |
 | `attach_m1prj` | `true` | Also attach m1-lsp to `Project.m1prj` (rename a channel from its declaration). |
 | `root_markers` | `{ "Project.m1prj", ".git" }` | Files marking a project root. |
-| `auto_install_parser` | `true` | Run `:TSInstall m1` if the parser is missing. |
+| `auto_install_parser` | `true` | Install the `m1` parser if missing. |
 | `lint_on_insert_leave` | `false` | Also lint on `InsertLeave`. |
-| `codelens` | `true` | Show m1-lsp code lenses (e.g. a script's `⚡ N Hz` rate) and keep them refreshed; run the lens under the cursor with `:M1CodeLensRun`. |
+| `codelens` | `true` | Show m1-lsp code lenses (e.g. a script's `⚡ N Hz` rate); run the lens under the cursor with `:M1CodeLensRun`. |
 | `capabilities` / `on_attach` | — | Forwarded to the LSP client. |
-| `settings` | `{}` | Unified m1-lsp config (lint/format/diagnostics), e.g. `{ lint = { max_line_length = 100 }, diagnostics = { ignore = { "T041" } } }`. A workspace `m1-tools.toml` overrides it. |
+| `settings` | `{}` | Unified m1-lsp config (lint/format/diagnostics), e.g. `{ lint = { max_line_length = 100 } }`. A workspace `m1-tools.toml` overrides it. |
 
-### Configuration
-
-`settings` is the convenient per-setup config. For **project-level** config shared
-with teammates (and the VS Code extension), commit an `m1-tools.toml` to the project
-root — the server discovers and applies it, **overriding** `settings`. It configures
-the same lint thresholds, formatter options, and cross-source diagnostic
-`ignore`/`select` (any lint `L*` or typecheck `T*` code). Generate one pre-filled
-with all defaults via `:M1GenerateConfig`.
+For **project-level** config shared with teammates (and the VS Code
+extension), commit an `m1-tools.toml` to the project root — the server
+discovers it and it overrides `settings` (see the
+[m1-tools configuration docs](https://github.com/C-Nucifora/m1-tools#configuration)).
+Generate one via `:M1GenerateConfig`.
 
 ### Commands
 
 | Command | Action |
 | --- | --- |
-| `:M1Format` | Format the current buffer now. |
-| `:M1FormatToggle` | Toggle format-on-save for this session. |
+| `:M1Format` / `:M1FormatToggle` | Format the buffer now / toggle format-on-save. |
 | `:M1Lint` | Lint the current buffer now. |
 | `:M1GenerateConfig` | Write a default `m1-tools.toml` to the project root. |
-| `:M1CreateChannel` | Create a channel in `Project.m1prj` (prompts for name/type/unit/security). |
-| `:M1SetSecurity` | Set a component's security/access level. |
-| `:M1SetType / :M1SetUnit / :M1SetCallRate` | Set a script's execution rate (picked from the project's clocks). |
-| `:M1CreateGroup` | Create a group in `Project.m1prj` (prompts for the fully-qualified name). |
-| `:M1RenameComponent` | Rename a component (picked from the project) and update its trigger references; warns when a backing `.m1scr` file may need renaming too. |
-| `:M1DeleteComponent` | Delete a component (picked from the project, confirms first; optional subtree). |
+| `:M1CreateChannel` / `:M1CreateParameter` / `:M1CreateGroup` / `:M1CreateFunction` / `:M1CreateScheduledFunction` | Create components in `Project.m1prj` (prompting for the details). |
+| `:M1SetSecurity` / `:M1SetType` / `:M1SetUnit` / `:M1SetCallRate` / `:M1SetQuantity` / `:M1SetFormat` / `:M1SetDps` / `:M1SetDisplayRange` / `:M1SetValidation` | Set a component's properties (pickers driven by the project model). |
+| `:M1AddTag` / `:M1RemoveTag` | Add or remove a System/Type tag. |
+| `:M1RenameComponent` / `:M1DeleteComponent` | Rename (updating trigger references) or delete a component. |
 | `:M1ValidateProject` | Validate `Project.m1prj` structure into the quickfix list. |
-| `:M1CreateParameter` / `:M1CreateFunction` / `:M1CreateScheduledFunction` | Create a parameter / function / scheduled function in `Project.m1prj`. |
-| `:M1SetValidation` | Set (or clear) a parameter's MinMax validation bounds — the in-editor remedy for T043. |
-| `:M1SetQuantity` / `:M1SetFormat` / `:M1SetDps` / `:M1SetDisplayRange` | Set a component's physical quantity / display format / decimal places / display range. |
-| `:M1AddTag` / `:M1RemoveTag` | Add or remove a System/Type tag — the in-editor remedy for the T092 tags audit. |
-| `:M1Install` / `:M1Update` | Download the bundled M1 toolchain at the pinned versions. |
+| `:M1Install` / `:M1Update` | Download the bundled toolchain at the pinned versions. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
-The project-editing commands drive `Project.m1prj` through the [`m1-project`](https://github.com/nedlane/m1-project)
-binary (the same tool the VS Code extension uses) — the language server stays
-read-only and reloads automatically after an edit. Put `m1-project` on `$PATH`
-(or set `project_path`); `:checkhealth nvim-m1` reports whether it's found.
+The project-editing commands drive `Project.m1prj` through the
+[m1-project](https://github.com/nedlane/m1-project) binary (the same tool the
+VS Code extension uses) — the language server stays read-only and reloads
+automatically after an edit.
 
-## Features
+### Extras
 
-| Feature | Provider |
-| --- | --- |
-| Syntax highlighting | tree-sitter-m1 |
-| Diagnostics (syntax + lint + types) | m1-lsp |
-| Hover, completion, go-to-definition | m1-lsp |
-| Go-to-implementation (a channel's write/producer sites) | m1-lsp |
-| Find references, rename | m1-lsp |
-| Inlay type-hints | m1-lsp |
-| Semantic tokens | m1-lsp |
-| Format-on-save | conform.nvim + m1-fmt |
-| Standalone lint | nvim-lint + m1-lint |
+A statusline component
+(`require("nvim-m1.statusline").component` — shows `m1 v<server-version>`
+when attached) and which-key labels for every `:M1*` command
+(`require("nvim-m1.whichkey").register()`).
 
 ## Development
 
@@ -135,9 +110,10 @@ read-only and reloads automatically after an edit. Put `m1-project` on `$PATH`
 scripts/test.sh   # headless plenary-busted suite
 ```
 
-The suite covers config resolution, the m1-lint JSON parser, setup wiring, and an
-end-to-end lint run against the real `m1-lint` binary (when it is on `$PATH`). Test
-fixtures are synthetic — no project data is checked in.
+The suite covers config resolution, the m1-lint JSON parser, setup wiring,
+and an end-to-end lint run against the real `m1-lint` binary when it is on
+`$PATH`. Test fixtures are synthetic — no project data is checked in. Lua is
+formatted with `stylua` (a separate CI job).
 
 ## License
 
@@ -148,25 +124,3 @@ GPL-3.0-or-later — see [LICENSE](LICENSE).
 Independent, community-built open-source tooling for the MoTeC® M1 script
 language. Not affiliated with, authorised, or endorsed by MoTeC Pty Ltd.
 "MoTeC" and "M1" are trademarks of MoTeC Pty Ltd.
-
-## Statusline component
-
-`require("nvim-m1.statusline").component` returns `"m1 v<server-version>"`
-when the m1-lsp client is attached to the current M1 buffer, `"m1 ✗"` when it
-is not, and `""` in non-M1 buffers. Drop it into lualine:
-
-```lua
-sections = { lualine_x = { require("nvim-m1.statusline").component } }
-```
-
-## which-key labels
-
-With [which-key](https://github.com/folke/which-key.nvim) installed:
-
-```lua
-require("nvim-m1.whichkey").register()                    -- <leader>m…
-require("nvim-m1.whichkey").register({ prefix = "<leader>k" })
-```
-
-registers labelled bindings for every `:M1*` command (a silent no-op when
-which-key is absent).
