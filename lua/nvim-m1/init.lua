@@ -232,6 +232,10 @@ local function user_commands()
   proj_cmd("M1AddTag", "add_tag", "add a System/Type tag to a component (T092 remedy)")
   proj_cmd("M1RemoveTag", "remove_tag", "remove a tag from a component")
 
+  -- #76: the m1-project v0.5.0 create-constant / create-table verbs.
+  proj_cmd("M1CreateConstant", "create_constant", "create a constant in Project.m1prj")
+  proj_cmd("M1CreateTable", "create_table", "create a 1-3 axis table in Project.m1prj")
+
   vim.api.nvim_create_user_command(
     "M1Install",
     function()

@@ -363,6 +363,60 @@ function M.create_group(cfg)
   end)
 end
 
+--- :M1CreateConstant — prompt name + literal value, then create-constant (#76).
+--- m1-project's create-constant takes only a name and value (no type/unit/
+--- security knobs), so we prompt for just those two.
+---@param cfg NvimM1Config
+---@param on_done? fun(ok: boolean, err: string?)
+function M.create_constant(cfg, on_done)
+  vim.ui.input({ prompt = "Constant name (Root.…): " }, function(name)
+    if not name or name == "" then
+      return
+    end
+    vim.ui.input({ prompt = "Value: " }, function(value)
+      if not value or value == "" then
+        return
+      end
+      run(
+        cfg,
+        { "create-constant", "--name", name, "--value", value },
+        "created constant " .. name,
+        { on_done = on_done }
+      )
+    end)
+  end)
+end
+
+--- :M1CreateTable — prompt name + 1–3 axis source channels, then create-table
+--- (#76). X is required; Y makes it 2-axis and Z makes it 3-axis, both optional
+--- (a blank source stops adding axes). Axis sources are picked from the project's
+--- components (falling back to free text), the same source telescope-m1 consumes.
+---@param cfg NvimM1Config
+---@param on_done? fun(ok: boolean, err: string?)
+function M.create_table(cfg, on_done)
+  vim.ui.input({ prompt = "Table name (Root.…): " }, function(name)
+    if not name or name == "" then
+      return
+    end
+    pick_component(cfg, nil, "X-axis source channel", function(axis_x)
+      local args = { "create-table", "--name", name, "--axis-x", axis_x }
+      vim.ui.input({ prompt = "Y-axis source (blank = 1-axis): " }, function(axis_y)
+        if axis_y and axis_y ~= "" then
+          vim.list_extend(args, { "--axis-y", axis_y })
+          vim.ui.input({ prompt = "Z-axis source (blank = 2-axis): " }, function(axis_z)
+            if axis_z and axis_z ~= "" then
+              vim.list_extend(args, { "--axis-z", axis_z })
+            end
+            run(cfg, args, "created table " .. name, { on_done = on_done })
+          end)
+        else
+          run(cfg, args, "created table " .. name, { on_done = on_done })
+        end
+      end)
+    end)
+  end)
+end
+
 --- :M1DeleteComponent — pick, confirm (destructive), then delete-component (#51).
 ---@param component? string  Pre-selected component (telescope action).
 function M.delete_component(cfg, component)
