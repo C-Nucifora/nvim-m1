@@ -544,6 +544,26 @@ function M.set_call_rate(cfg)
   end)
 end
 
+--- Programmatic set-call-rate (telescope-m1.nvim delegates here, #26 there):
+--- the same serialized per-project mutation queue, error reporting, and LSP
+--- reload notification as :M1SetCallRate, but without UI prompts — for
+--- callers that already know the script and rate.
+---@param cfg table  Plugin config (e.g. `require("nvim-m1").config`).
+---@param script string  Dotted script path (`Root.…`).
+---@param rate string|number  `"100"`, `"100Hz"`, or `"startup"` (any case).
+---@param opts? { label?: string, on_done?: fun(ok: boolean, err?: string) }
+function M.set_call_rate_for(cfg, script, rate, opts)
+  opts = opts or {}
+  local raw = tostring(rate)
+  local norm = raw:lower():match("startup") and "startup" or raw:gsub("[Hh]z$", "")
+  run(
+    cfg,
+    { "set-call-rate", "--script", script, "--rate", norm },
+    opts.label or (script .. " call rate -> " .. raw),
+    { on_done = opts.on_done }
+  )
+end
+
 --- :M1CreateParameter — prompt for name + type + unit + security (#61).
 function M.create_parameter(cfg)
   vim.ui.input({ prompt = "Parameter name (Root.…): " }, function(name)
