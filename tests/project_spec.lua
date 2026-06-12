@@ -69,6 +69,15 @@ describe("nvim-m1.project", function()
     vim.ui.input, vim.ui.select = orig_input, orig_select
     assert.is_true(okp)
 
+    -- The mutation runs async via vim.system; await the per-project queue
+    -- rather than reading the file mid-write (#71).
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "set_validation did not finish within 5s"
+    )
+
     local written = table.concat(vim.fn.readfile(prj), "\n")
     assert.is_truthy(
       written:find("Validation", 1, true),
@@ -113,12 +122,77 @@ describe("nvim-m1.project", function()
     vim.ui.input, vim.ui.select = orig_input, orig_select
     assert.is_true(okp)
 
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "create_channel did not finish within 5s"
+    )
+
     local written = table.concat(vim.fn.readfile(prj), "\n")
     assert.is_truthy(
       written:find('Name="Root.Engine.NewSignal"', 1, true),
       "m1-project should have inserted the channel: " .. written
     )
     assert.is_truthy(written:find('Type="f32"', 1, true))
+  end)
+
+  -- #71: two mutations fired at one project without awaiting between them must
+  -- both land. m1-project read-modify-writes Project.m1prj, so unserialized
+  -- async runs would race and the last writer would clobber the first's edit.
+  -- The per-project queue chains them; is_idle() lets us await the drain.
+  it("serializes concurrent mutations so neither edit is lost (#71)", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    -- Drive create_channel twice back-to-back. Each resolves its mocked
+    -- (synchronous) prompts and enqueues a mutation before the first subprocess
+    -- has finished, so both target the same file "at once".
+    local names = { "Root.Engine.Alpha", "Root.Engine.Beta" }
+    local orig_input, orig_select = vim.ui.input, vim.ui.select
+    local cfg = config.resolve()
+    for _, name in ipairs(names) do
+      local inputs = { name, "" } -- channel name, (no unit)
+      local selects = { "f32", "Tune" } -- storage type, security
+      vim.ui.input = function(_, cb)
+        cb(table.remove(inputs, 1))
+      end
+      vim.ui.select = function(_, _, cb)
+        cb(table.remove(selects, 1))
+      end
+      project.create_channel(cfg)
+    end
+    vim.ui.input, vim.ui.select = orig_input, orig_select
+
+    assert.is_true(
+      vim.wait(10000, function()
+        return project.is_idle()
+      end),
+      "queued mutations did not drain within 10s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find('Name="Root.Engine.Alpha"', 1, true),
+      "first channel was lost — mutations were not serialized:\n" .. written
+    )
+    assert.is_truthy(
+      written:find('Name="Root.Engine.Beta"', 1, true),
+      "second channel missing:\n" .. written
+    )
   end)
 end)
 
@@ -169,6 +243,12 @@ describe("nvim-m1 next-gen additions", function()
     end)
     vim.ui.input = orig_input
     assert.is_true(okp)
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "create_group did not finish within 5s"
+    )
     local written = table.concat(vim.fn.readfile(prj), "\n")
     assert.is_truthy(
       written:find('Name="Root.Engine.Sub"', 1, true),
