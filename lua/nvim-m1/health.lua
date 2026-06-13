@@ -71,7 +71,7 @@ function M.check()
   end
   local proj = require("nvim-m1.project").resolve_cmd(cfg)
   if proj then
-    ok("m1-project: " .. proj .. " (:M1CreateChannel/SetSecurity/SetCallRate)")
+    ok("m1-project: " .. proj .. " (:M1Create*/Set*/Rename/Delete/Validate)")
   else
     warn("m1-project not found — project-editing commands unavailable", {
       "Run :M1Install to download the bundled toolchain, or set opts.project_path.",
