@@ -114,6 +114,284 @@ describe("nvim-m1.project", function()
     )
   end)
 
+  -- End-to-end (#61): set_quantity writes a physical quantity attribute.
+  it("set_quantity writes a physical quantity via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Engine.Speed", "Angular Speed" }
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    local okp = pcall(function()
+      project.set_quantity(require("nvim-m1.config").resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "set_quantity did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find("Angular Speed", 1, true),
+      "quantity written:\n" .. written
+    )
+  end)
+
+  -- End-to-end (#61): set_format writes a display format string.
+  it("set_format writes a display format via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Engine.Speed", "%.1f" }
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    local okp = pcall(function()
+      project.set_format(require("nvim-m1.config").resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "set_format did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(written:find("%.1f", 1, true), "format written:\n" .. written)
+  end)
+
+  -- End-to-end (#61): set_dps writes a display decimal-places value.
+  it("set_dps writes decimal places via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Engine.Speed", "2" }
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    local okp = pcall(function()
+      project.set_dps(require("nvim-m1.config").resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "set_dps did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    -- m1-project writes DPS="<n>" (uppercase) into a Locale/Default element.
+    assert.is_truthy(written:find("DPS", 1, true), "dps written:\n" .. written)
+  end)
+
+  -- End-to-end (#61): set_display_range writes display min/max bounds.
+  it("set_display_range writes display min/max via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Engine.Speed", "0", "200" }
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    local okp = pcall(function()
+      project.set_display_range(require("nvim-m1.config").resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "set_display_range did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    -- m1-project writes Max/Min as scientific notation, e.g. Max="2.0...e+02".
+    assert.is_truthy(
+      written:find("Max=", 1, true),
+      "display range written:\n" .. written
+    )
+  end)
+
+  -- End-to-end (#61): add_tag writes a tag entry on the component.
+  it("add_tag writes a tag via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { "Root.Engine.Speed", "System/Speed" }
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    local okp = pcall(function()
+      project.add_tag(require("nvim-m1.config").resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "add_tag did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(written:find("System/Speed", 1, true), "tag written:\n" .. written)
+  end)
+
+  -- End-to-end (#61): remove_tag removes a previously-added tag from a component.
+  -- Uses add_tag first so the tag is written in the exact format m1-project
+  -- expects; a hand-crafted fixture uses the wrong shape and remove-tag rejects it.
+  it("remove_tag removes a tag via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+    local cfg = require("nvim-m1.config").resolve()
+
+    -- Step 1: add the tag so m1-project writes it in its own format.
+    local add_inputs = { "Root.Engine.Speed", "System/Speed" }
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(table.remove(add_inputs, 1))
+    end
+    local okp = pcall(function()
+      project.add_tag(cfg)
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "add_tag (setup for remove_tag) did not finish within 5s"
+    )
+
+    -- Step 2: remove the tag that was just written.
+    local rm_inputs = { "Root.Engine.Speed", "System/Speed" }
+    vim.ui.input = function(_, cb)
+      cb(table.remove(rm_inputs, 1))
+    end
+    local okp2 = pcall(function()
+      project.remove_tag(cfg)
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp2)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "remove_tag did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_falsy(
+      written:find("System/Speed", 1, true),
+      "tag should have been removed:\n" .. written
+    )
+  end)
+
   -- End-to-end: with the real m1-project binary on $PATH, the create-channel
   -- command drives the CLI and rewrites Project.m1prj.
   it("create_channel edits Project.m1prj via the real binary", function()
