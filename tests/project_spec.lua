@@ -11,6 +11,35 @@ describe("nvim-m1.project", function()
     end)
   end)
 
+  -- #87: notify_reload must use the colon (method) form `client:notify(...)`.
+  -- The dot form `client.notify(...)` is deprecated in Neovim 0.12 and a hard
+  -- error in 0.13. The colon form passes the client as `self`; assert the fake
+  -- client receives itself as the first argument (which the dot form omits).
+  it("notify_reload calls client:notify (method form, not dot form) (#87)", function()
+    local got_self, got_method, got_params
+    local fake = {
+      name = require("nvim-m1.lsp").client_name,
+      notify = function(self, method, params)
+        got_self, got_method, got_params = self, method, params
+      end,
+    }
+    local orig = vim.lsp.get_clients
+    vim.lsp.get_clients = function()
+      return { fake }
+    end
+    local okp = pcall(function()
+      project.notify_reload("/tmp/Some/Project.m1prj")
+    end)
+    vim.lsp.get_clients = orig
+    assert.is_true(okp)
+    -- Colon-call binds `self` to the client; dot-call would leave it as the
+    -- method string. This is exactly what the 0.13 deprecation keys off.
+    assert.are.equal(fake, got_self, "client:notify must pass the client as self")
+    assert.are.equal("workspace/didChangeWatchedFiles", got_method)
+    assert.is_table(got_params.changes)
+    assert.are.equal(2, got_params.changes[1].type) -- 2 = Changed
+  end)
+
   it("registers the project-editing user commands after setup", function()
     require("nvim-m1").setup()
     local cmds = vim.api.nvim_get_commands({})
