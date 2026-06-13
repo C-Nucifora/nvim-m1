@@ -84,7 +84,7 @@ Generate one via `:M1GenerateConfig`.
 | `:M1Format` / `:M1FormatToggle` | Format the buffer now / toggle format-on-save. |
 | `:M1Lint` | Lint the current buffer now. |
 | `:M1GenerateConfig` | Write a default `m1-tools.toml` to the project root. |
-| `:M1CreateChannel` / `:M1CreateParameter` / `:M1CreateGroup` / `:M1CreateFunction` / `:M1CreateScheduledFunction` | Create components in `Project.m1prj` (prompting for the details). |
+| `:M1CreateChannel` / `:M1CreateParameter` / `:M1CreateGroup` / `:M1CreateFunction` / `:M1CreateScheduledFunction` / `:M1CreateConstant` / `:M1CreateTable` | Create components in `Project.m1prj` (prompting for the details). |
 | `:M1SetSecurity` / `:M1SetType` / `:M1SetUnit` / `:M1SetCallRate` / `:M1SetQuantity` / `:M1SetFormat` / `:M1SetDps` / `:M1SetDisplayRange` / `:M1SetValidation` | Set a component's properties (pickers driven by the project model). |
 | `:M1AddTag` / `:M1RemoveTag` | Add or remove a System/Type tag. |
 | `:M1RenameComponent` / `:M1DeleteComponent` | Rename (updating trigger references) or delete a component. |
