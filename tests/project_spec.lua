@@ -741,3 +741,62 @@ describe("nvim-m1.project.set_call_rate_for (#26 in telescope-m1.nvim)", functio
     assert.is_truthy(written:find("100Hz", 1, true), "call rate written:\n" .. written)
   end)
 end)
+
+-- #91: :M1ValidateProject's vim.system():wait() must pass a timeout and be
+-- pcall-wrapped, like every other sync call site (#68). Without a timeout a hung
+-- `m1-project validate` blocks the UI thread forever; that's the freeze #68 was
+-- created to prevent, regressed for this one command.
+describe("nvim-m1.project.validate timeout (#91)", function()
+  local saved_system, saved_resolve, saved_project_file, saved_notify
+  local saved_setqflist
+
+  before_each(function()
+    saved_system = vim.system
+    saved_resolve = project.resolve_cmd
+    saved_project_file = project.project_file
+    saved_notify = vim.notify
+    saved_setqflist = vim.fn.setqflist
+    project.resolve_cmd = function()
+      return "/fake/m1-project"
+    end
+    project.project_file = function()
+      return "/tmp/Some/Project.m1prj"
+    end
+    vim.notify = function() end
+    vim.fn.setqflist = function() end
+  end)
+  after_each(function()
+    vim.system = saved_system
+    project.resolve_cmd = saved_resolve
+    project.project_file = saved_project_file
+    vim.notify = saved_notify
+    vim.fn.setqflist = saved_setqflist
+  end)
+
+  it("passes a finite timeout to :wait (never an unbounded block)", function()
+    local got_timeout = "unset"
+    vim.system = function()
+      return {
+        wait = function(_, timeout)
+          got_timeout = timeout
+          return { code = 0, stdout = "", stderr = "" }
+        end,
+      }
+    end
+    project.validate(require("nvim-m1.config").resolve())
+    assert.are.equal(5000, got_timeout, "validate must call :wait(5000), not :wait()")
+  end)
+
+  it("does not propagate a hung/errored :wait (pcall-guarded)", function()
+    vim.system = function()
+      return {
+        wait = function()
+          error("simulated subprocess hang/spawn failure")
+        end,
+      }
+    end
+    assert.has_no.errors(function()
+      project.validate(require("nvim-m1.config").resolve())
+    end)
+  end)
+end)

@@ -488,8 +488,17 @@ function M.validate(cfg)
     vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
     return
   end
-  -- validate exits 1 on error-level findings; the report is still on stdout.
-  local res = vim.system({ bin, "validate", "--project", prj }):wait()
+  -- :wait(timeout) pumps the loop instead of hard-blocking, and degrades a hung
+  -- subprocess to a clean error rather than freezing the editor's UI thread
+  -- indefinitely (#68, #91 — this call site was missed by #68). validate exits 1
+  -- on error-level findings; the report is still on stdout.
+  local ran, res = pcall(function()
+    return vim.system({ bin, "validate", "--project", prj }, { text = true }):wait(5000)
+  end)
+  if not ran then
+    vim.notify("nvim-m1: validate timed out or failed to run", vim.log.levels.ERROR)
+    return
+  end
   local out = res.stdout or ""
   if out == "" and res.code ~= 0 then
     vim.notify("nvim-m1: validate failed: " .. (res.stderr or ""), vim.log.levels.ERROR)
