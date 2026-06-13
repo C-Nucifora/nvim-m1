@@ -815,7 +815,9 @@ describe("nvim-m1.project set_call_rate Hz case-insensitivity (#92)", function()
     assert.are.equal(
       "100",
       rate_val,
-      "expected --rate 100 but got --rate " .. tostring(rate_val) .. " (Hz suffix not stripped)"
+      "expected --rate 100 but got --rate "
+        .. tostring(rate_val)
+        .. " (Hz suffix not stripped)"
     )
   end)
 end)
