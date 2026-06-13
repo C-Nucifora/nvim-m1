@@ -546,7 +546,8 @@ function M.set_call_rate(cfg)
       if not pick then
         return
       end
-      local rate = pick:lower():match("startup") and "startup" or pick:gsub("Hz$", "")
+      local rate = pick:lower():match("startup") and "startup"
+        or pick:gsub("[Hh]z$", "")
       run(
         cfg,
         { "set-call-rate", "--script", script, "--rate", rate },

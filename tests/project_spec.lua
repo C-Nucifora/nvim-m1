@@ -742,6 +742,86 @@ describe("nvim-m1.project.set_call_rate_for (#26 in telescope-m1.nvim)", functio
   end)
 end)
 
+-- :M1SetCallRate Hz suffix normalisation must be case-insensitive (#92).
+-- The interactive command used `pick:gsub("Hz$", "")` which silently passed
+-- "100hz" verbatim to m1-project when the user typed or pasted lowercase "hz".
+-- The lower-level set_call_rate_for() already used "[Hh]z$"; this aligns them.
+describe("nvim-m1.project set_call_rate Hz case-insensitivity (#92)", function()
+  local project = require("nvim-m1.project")
+  local saved_system, saved_resolve, saved_project_file, saved_notify
+  local saved_ui_input, saved_ui_select
+
+  before_each(function()
+    saved_system = vim.system
+    saved_resolve = project.resolve_cmd
+    saved_project_file = project.project_file
+    saved_notify = vim.notify
+    saved_ui_input = vim.ui.input
+    saved_ui_select = vim.ui.select
+    project.resolve_cmd = function()
+      return "/fake/m1-project"
+    end
+    project.project_file = function()
+      return "/tmp/Some/Project.m1prj"
+    end
+    vim.notify = function() end
+  end)
+
+  after_each(function()
+    vim.system = saved_system
+    project.resolve_cmd = saved_resolve
+    project.project_file = saved_project_file
+    vim.notify = saved_notify
+    vim.ui.input = saved_ui_input
+    vim.ui.select = saved_ui_select
+  end)
+
+  it("strips lowercase 'hz' suffix before passing --rate to m1-project", function()
+    local captured_cmd
+    vim.system = function(cmd, _, cb)
+      captured_cmd = vim.deepcopy(cmd)
+      -- Invoke the callback synchronously so drain() completes in-test.
+      vim.schedule(function()
+        cb({ code = 0, stdout = "", stderr = "" })
+      end)
+    end
+
+    -- Simulate the user typing a script name then picking "100hz" (lowercase).
+    vim.ui.input = function(_, cb)
+      cb("Root.Engine.Update")
+    end
+    vim.ui.select = function(_, _, cb)
+      cb("100hz")
+    end
+
+    project.set_call_rate(require("nvim-m1.config").resolve())
+
+    -- Allow vim.schedule callbacks (the drain completion handler) to run.
+    assert.is_true(
+      vim.wait(1000, function()
+        return captured_cmd ~= nil
+      end),
+      "set_call_rate did not invoke vim.system within 1s"
+    )
+
+    -- Find the --rate argument in the command.
+    local rate_val
+    for i, v in ipairs(captured_cmd) do
+      if v == "--rate" then
+        rate_val = captured_cmd[i + 1]
+        break
+      end
+    end
+    assert.are.equal(
+      "100",
+      rate_val,
+      "expected --rate 100 but got --rate "
+        .. tostring(rate_val)
+        .. " (Hz suffix not stripped)"
+    )
+  end)
+end)
+
 -- #91: :M1ValidateProject's vim.system():wait() must pass a timeout and be
 -- pcall-wrapped, like every other sync call site (#68). Without a timeout a hung
 -- `m1-project validate` blocks the UI thread forever; that's the freeze #68 was
