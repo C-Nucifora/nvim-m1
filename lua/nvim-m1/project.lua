@@ -33,7 +33,10 @@ function M.notify_reload(prj)
   local name = require("nvim-m1.lsp").client_name
   local uri = vim.uri_from_fname(prj)
   for _, client in ipairs(vim.lsp.get_clients({ name = name })) do
-    client.notify("workspace/didChangeWatchedFiles", {
+    -- Colon (method) form: `client.notify` (dot form) is deprecated in Neovim
+    -- 0.12 and a hard error in 0.13 (#87). Older 0.10/0.11 clients still expose
+    -- `:notify`, so this is backwards-compatible.
+    client:notify("workspace/didChangeWatchedFiles", {
       changes = { { uri = uri, type = 2 } }, -- 2 = Changed
     })
   end
