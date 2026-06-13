@@ -190,7 +190,7 @@ local function user_commands()
     project.set_call_rate(M.config or config.defaults)
   end, { desc = "nvim-m1: set a script's execution rate (m1-project)" })
 
-  -- #51: the m1-project v0.3.0 verbs.
+  -- #51: the m1-project verbs added through v0.7.0 (create-group, delete/rename-component, validate).
   vim.api.nvim_create_user_command("M1CreateGroup", function()
     project.create_group(M.config or config.defaults)
   end, { desc = "nvim-m1: create a group in Project.m1prj (m1-project)" })
@@ -204,7 +204,7 @@ local function user_commands()
     project.validate(M.config or config.defaults)
   end, { desc = "nvim-m1: validate Project.m1prj into the quickfix list (m1-project)" })
 
-  -- #61: the remaining m1-project v0.4.0 verbs.
+  -- #61: the remaining m1-project verbs added through v0.7.0 (create-parameter/function, set-quantity/format/dps/display-range/validation, add/remove-tag).
   proj_cmd(
     "M1CreateParameter",
     "create_parameter",
@@ -232,7 +232,7 @@ local function user_commands()
   proj_cmd("M1AddTag", "add_tag", "add a System/Type tag to a component (T092 remedy)")
   proj_cmd("M1RemoveTag", "remove_tag", "remove a tag from a component")
 
-  -- #76: the m1-project v0.5.0 create-constant / create-table verbs.
+  -- #76: the m1-project create-constant / create-table verbs (pinned at v0.7.0).
   proj_cmd("M1CreateConstant", "create_constant", "create a constant in Project.m1prj")
   proj_cmd("M1CreateTable", "create_table", "create a 1-3 axis table in Project.m1prj")
 
