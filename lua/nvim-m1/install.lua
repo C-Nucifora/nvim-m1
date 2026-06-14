@@ -398,6 +398,15 @@ function M.stale_tools()
   return stale
 end
 
+--- Set while an `install_async` chain is downloading, to serialise installs.
+--- Without it the first-open self-heal and a user `:M1Install`/`:M1Update` (both
+--- route through `install_async`) could overlap: two `curl -o <dest>` runs
+--- writing the SAME bundled binary path, and two `write_manifest` calls
+--- rewriting the SAME `.installed.json` — corrupting a binary or leaving the
+--- manifest inconsistent. While set, a second `install_async` is a no-op that
+--- immediately reports `on_done(false)`.
+M._in_flight = false
+
 --- Install (download) the bundled M1 toolchain without blocking the editor:
 --- the tools download sequentially off the UI thread, the manifest records
 --- what landed, and `on_done(ok)` fires on the main loop when the last tool
@@ -405,9 +414,27 @@ end
 --- the old synchronous download froze the UI for the whole curl + attestation
 --- round-trip of every stale tool (#65). Safe to re-run; overwrites with the
 --- pinned versions.
+---
+--- Serialised: while one chain is in flight a second call is a no-op (notifies
+--- + `on_done(false)`), so the self-heal and a manual :M1Install cannot run two
+--- curl/manifest write chains against the same paths at once. The guard is set
+--- only after the platform check (so a platform failure returns before ever
+--- setting it) and cleared on the terminal last-tool branch, so a failed
+--- attempt never wedges future installs.
 ---@param tools? string[]  Subset to install (default: all of `M.tools`).
 ---@param on_done? fun(ok: boolean)
 function M.install_async(tools, on_done)
+  if M._in_flight then
+    vim.notify(
+      "nvim-m1: toolchain install already in progress — ignoring duplicate request.",
+      vim.log.levels.WARN
+    )
+    if on_done then
+      on_done(false)
+    end
+    return
+  end
+
   tools = tools or M.tools
   local triple, _, err = M.platform()
   if not triple then
@@ -418,6 +445,7 @@ function M.install_async(tools, on_done)
     return
   end
 
+  M._in_flight = true
   local manifest = M.installed_versions()
   local all_ok = true
   local i = 0
@@ -426,6 +454,7 @@ function M.install_async(tools, on_done)
     local tool = tools[i]
     if not tool then
       write_manifest(manifest)
+      M._in_flight = false
       if all_ok then
         vim.notify("nvim-m1: toolchain installed into " .. M.bin_dir())
       end
