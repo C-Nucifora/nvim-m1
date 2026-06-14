@@ -203,9 +203,16 @@ function M.rates(cfg)
   return list_rates(cfg)
 end
 
---- :M1CreateChannel — prompt for name/type/unit/security, then create-channel.
-function M.create_channel(cfg)
-  vim.ui.input({ prompt = "New channel (Root.Group.Name): " }, function(name)
+--- Run the shared name -> storage type -> unit -> security prompt cascade and
+--- arg-assembly for the typed-component creators (create-channel,
+--- create-parameter), which differ only in the subcommand verb, the first
+--- prompt label, and the success-toast noun. Keeping this in one place means a
+--- fix to the cascade (a new flag, a cancel edge case) lands in both verbs at
+--- once instead of needing to be mirrored by hand.
+---@param cfg NvimM1Config
+---@param opts { verb: string, name_prompt: string, success_label_prefix: string }
+local function create_typed_component(cfg, opts)
+  vim.ui.input({ prompt = opts.name_prompt }, function(name)
     if not name or name == "" then
       return
     end
@@ -224,25 +231,31 @@ function M.create_channel(cfg)
             if not sec then
               return
             end
-            local args = { "create-channel", "--name", name }
+            local args = { opts.verb, "--name", name }
             if ty ~= "(none)" then
-              table.insert(args, "--type")
-              table.insert(args, ty)
+              vim.list_extend(args, { "--type", ty })
             end
             if unit ~= "" then
-              table.insert(args, "--unit")
-              table.insert(args, unit)
+              vim.list_extend(args, { "--unit", unit })
             end
             if sec ~= "(none)" then
-              table.insert(args, "--security")
-              table.insert(args, sec)
+              vim.list_extend(args, { "--security", sec })
             end
-            run(cfg, args, "created channel " .. name)
+            run(cfg, args, opts.success_label_prefix .. name)
           end
         )
       end)
     end)
   end)
+end
+
+--- :M1CreateChannel — prompt for name/type/unit/security, then create-channel.
+function M.create_channel(cfg)
+  create_typed_component(cfg, {
+    verb = "create-channel",
+    name_prompt = "New channel (Root.Group.Name): ",
+    success_label_prefix = "created channel ",
+  })
 end
 
 --- :M1SetSecurity — prompt for component (unless given) + level.
@@ -579,41 +592,11 @@ end
 
 --- :M1CreateParameter — prompt for name + type + unit + security (#61).
 function M.create_parameter(cfg)
-  vim.ui.input({ prompt = "Parameter name (Root.…): " }, function(name)
-    if not name or name == "" then
-      return
-    end
-    vim.ui.select(TYPES, { prompt = "Storage type" }, function(ty)
-      if not ty then
-        return
-      end
-      vim.ui.input({ prompt = "Unit (optional): " }, function(unit)
-        if unit == nil then
-          return
-        end
-        vim.ui.select(
-          { "(none)", unpack(SECURITY) },
-          { prompt = "Security" },
-          function(sec)
-            if not sec then
-              return
-            end
-            local args = { "create-parameter", "--name", name }
-            if ty ~= "(none)" then
-              vim.list_extend(args, { "--type", ty })
-            end
-            if unit ~= "" then
-              vim.list_extend(args, { "--unit", unit })
-            end
-            if sec ~= "(none)" then
-              vim.list_extend(args, { "--security", sec })
-            end
-            run(cfg, args, "created parameter " .. name)
-          end
-        )
-      end)
-    end)
-  end)
+  create_typed_component(cfg, {
+    verb = "create-parameter",
+    name_prompt = "Parameter name (Root.…): ",
+    success_label_prefix = "created parameter ",
+  })
 end
 
 --- :M1CreateFunction / :M1CreateScheduledFunction — prompt for the name (#61).
