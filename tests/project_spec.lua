@@ -11,6 +11,18 @@ describe("nvim-m1.project", function()
     end)
   end)
 
+  it("security_levels falls back to the built-in groups when unqueryable", function()
+    -- A bogus binary path forces the query to fail, so the offered groups are
+    -- the M1 built-in defaults (parity with m1-vscode's fallback). With a real,
+    -- list-security-capable binary and a project, it returns that project's
+    -- declared <SecurityRoles> instead.
+    local levels =
+      project.security_levels({ project_path = "/nonexistent/m1-project-xyz" })
+    assert.is_true(#levels >= 1)
+    assert.is_true(vim.tbl_contains(levels, "Tune"))
+    assert.is_true(vim.tbl_contains(levels, "Resource"))
+  end)
+
   -- #87: notify_reload must use the colon (method) form `client:notify(...)`.
   -- The dot form `client.notify(...)` is deprecated in Neovim 0.12 and a hard
   -- error in 0.13. The colon form passes the client as `self`; assert the fake
@@ -1288,6 +1300,21 @@ describe(
       -- Intercept the spawn: record the command and never actually run it; drive
       -- the success path so the queue drains and is_idle() goes true.
       vim.system = function(cmd, _, on_exit)
+        -- The Security prompt probes `list-security` synchronously (:wait, #106).
+        -- Answer it with the built-in groups so the cascade proceeds, and don't
+        -- let the probe overwrite the capture — only the create-* spawn (with an
+        -- on_exit callback) is the command under test.
+        if cmd[2] == "list-security" then
+          return {
+            wait = function()
+              return {
+                code = 0,
+                stdout = "Tune\nCalibration\nMaster Calibration\nResource\n",
+                stderr = "",
+              }
+            end,
+          }
+        end
         captured = cmd
         vim.schedule(function()
           on_exit({ code = 0, stdout = "", stderr = "" })
