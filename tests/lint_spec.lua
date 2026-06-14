@@ -201,8 +201,14 @@ describe("nvim-m1.lint.setup autocmd gating (#25, deferred decision)", function(
   local lsp = require("nvim-m1.lsp")
   local saved_resolve
 
+  -- Count only the save/read hook (the LspAttach cleanup handler is wired
+  -- unconditionally now — see the "late LSP attach" describe — so a group-wide
+  -- count would conflate the two).
   local function autocmds()
-    return vim.api.nvim_get_autocmds({ group = "NvimM1Lint" })
+    return vim.api.nvim_get_autocmds({
+      group = "NvimM1Lint",
+      event = { "BufWritePost", "BufReadPost", "InsertLeave" },
+    })
   end
 
   before_each(function()
@@ -220,7 +226,7 @@ describe("nvim-m1.lint.setup autocmd gating (#25, deferred decision)", function(
     assert.is_true(#autocmds() >= 1)
   end)
 
-  it("does NOT wire the hook when lint_on_save is disabled", function()
+  it("does NOT wire the save/read hook when lint_on_save is disabled", function()
     lsp.resolve_cmd = function()
       return nil
     end
@@ -242,6 +248,128 @@ describe("nvim-m1.lint.setup autocmd gating (#25, deferred decision)", function(
     end
     lint.setup({ lint_on_save = true, lsp = true })
     assert.is_true(#autocmds() >= 1)
+  end)
+end)
+
+describe("nvim-m1.lint NS clearing on late LSP attach (#25 timeline)", function()
+  -- The standalone fallback linter publishes into its own namespace. If the LSP
+  -- was unresolvable at BufReadPost the standalone runner publishes there; when
+  -- m1-lsp later attaches (e.g. via :M1Install) it publishes the SAME lint
+  -- diagnostics through its own namespace. The stale standalone set must be
+  -- cleared, or every warning shows twice until the next re-read.
+  local lsp = require("nvim-m1.lsp")
+  local saved_get_clients, saved_resolve_cmd
+  local buf
+
+  -- Seed the standalone linter's namespace with a diagnostic, as a prior
+  -- BufReadPost run (before the LSP was available) would have.
+  local function seed_ns(b)
+    vim.diagnostic.set(lint.namespace(), b, {
+      {
+        lnum = 0,
+        col = 0,
+        end_lnum = 0,
+        end_col = 1,
+        severity = vim.diagnostic.severity.WARN,
+        message = "stale standalone lint",
+        source = "m1-lint",
+      },
+    })
+  end
+
+  local function ns_count(b)
+    return #vim.diagnostic.get(b, { namespace = lint.namespace() })
+  end
+
+  before_each(function()
+    saved_get_clients = vim.lsp.get_clients
+    saved_resolve_cmd = lsp.resolve_cmd
+    buf = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_name(buf, "/tmp/late-attach.m1scr")
+    vim.bo[buf].filetype = "m1scr"
+  end)
+  after_each(function()
+    vim.lsp.get_clients = saved_get_clients
+    lsp.resolve_cmd = saved_resolve_cmd
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      vim.diagnostic.reset(lint.namespace(), buf)
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  it("exposes the standalone-linter namespace", function()
+    assert.is_number(lint.namespace())
+  end)
+
+  it("M.lint clears stale standalone diagnostics when m1lsp is attached", function()
+    seed_ns(buf)
+    assert.equals(1, ns_count(buf))
+    vim.lsp.get_clients = function()
+      return { { name = lsp.client_name } }
+    end
+    -- LSP attached: M.lint must bail (no double-publish) AND clear the stale set
+    -- it left behind on an earlier standalone run.
+    lint.lint(buf)
+    assert.equals(0, ns_count(buf))
+  end)
+
+  it("the fire-time defer path clears stale standalone diagnostics", function()
+    seed_ns(buf)
+    assert.equals(1, ns_count(buf))
+    -- m1-lsp is resolvable (about to attach), so the autocmd callback defers to
+    -- it. Deferring must also clear any prior standalone run for this buffer.
+    lsp.resolve_cmd = function()
+      return "/usr/bin/m1-lsp"
+    end
+    vim.lsp.get_clients = function()
+      return {}
+    end
+    lint.setup({ lint_on_save = true, lsp = true })
+    local cbs = vim.api.nvim_get_autocmds({
+      group = "NvimM1Lint",
+      event = "BufReadPost",
+    })
+    assert.is_true(#cbs >= 1)
+    -- Fire the read hook the way Neovim would.
+    vim.api.nvim_exec_autocmds("BufReadPost", { buffer = buf })
+    vim.wait(20)
+    assert.equals(0, ns_count(buf))
+  end)
+
+  it("registers an LspAttach handler that clears NS once m1lsp is attached", function()
+    seed_ns(buf)
+    assert.equals(1, ns_count(buf))
+    lint.setup({ lint_on_save = true, lsp = true })
+    -- Simulate m1-lsp attaching after a standalone run: it is now in the
+    -- buffer's client list. The handler must clear the standalone namespace so
+    -- the LSP's diagnostics are not doubled.
+    vim.lsp.get_clients = function()
+      return { { name = lsp.client_name } }
+    end
+    vim.api.nvim_exec_autocmds("LspAttach", {
+      buffer = buf,
+      data = { client_id = 1 },
+      modeline = false,
+    })
+    vim.wait(20)
+    assert.equals(0, ns_count(buf))
+  end)
+
+  it("LspAttach for a non-m1lsp client does NOT clear NS", function()
+    seed_ns(buf)
+    lint.setup({ lint_on_save = true, lsp = true })
+    -- A different server attaching (m1lsp absent from the client list) must not
+    -- wipe the standalone fallback set.
+    vim.lsp.get_clients = function()
+      return { { name = "lua_ls" } }
+    end
+    vim.api.nvim_exec_autocmds("LspAttach", {
+      buffer = buf,
+      data = { client_id = 424242 },
+      modeline = false,
+    })
+    vim.wait(20)
+    assert.equals(1, ns_count(buf))
   end)
 end)
 
