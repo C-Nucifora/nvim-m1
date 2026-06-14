@@ -1,0 +1,29 @@
+{
+  "is arm": {
+    "prefix": "is",
+    "body": ["is (${1:State})", "{", "\t$0", "}"],
+    "description": "one is-arm of a when block (m1-lsp completes the whole when/is head, not a standalone arm)"
+  },
+  "if / else": {
+    "prefix": "ifelse",
+    "body": ["if (${1:condition})", "{", "\t$2", "}", "else", "{", "\t$0", "}"],
+    "description": "Allman-style if/else (m1-lsp only completes the no-else if)"
+  },
+  "NaN guard": {
+    "prefix": "nanguard",
+    "body": [
+      "${1:Target} = Calculate.IsNAN(${2:value}) ? ${3:fallback} : ${2:value};"
+    ],
+    "description": "the ECU-legal NaN guard the invalid-value tracer recognises"
+  },
+  "annotation: requires finite": {
+    "prefix": "m1finite",
+    "body": ["// @m1:requires-finite"],
+    "description": "mark the next write as a finite-value sink (typecheck T080)"
+  },
+  "annotation: allow": {
+    "prefix": "m1allow",
+    "body": ["// @m1:allow(${1:T002})"],
+    "description": "suppress a diagnostic on the next construct"
+  }
+}

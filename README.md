@@ -105,6 +105,40 @@ A statusline component
 when attached) and which-key labels for every `:M1*` command
 (`require("nvim-m1.whichkey").register()`).
 
+**Snippets.** The construct *heads* (`if` / `when` / `expand` / `local` /
+`static`) already arrive from `m1-lsp` completion as
+[`InsertTextFormat::Snippet`](https://github.com/C-Nucifora/m1-lsp), so any
+snippet-aware completion expands them — nvim-m1 does not re-ship those. It does
+bundle the few idioms the server has no path for, in
+[`snippets/m1scr.json`](snippets/m1scr.json) (VS Code snippet format):
+
+| Prefix | Expands to |
+| --- | --- |
+| `is` | a standalone `is (…) { … }` arm of a `when` block |
+| `ifelse` | the full Allman `if … else …` skeleton (the LSP emits only the no-`else` `if`) |
+| `nanguard` | the ECU-legal `Target = Calculate.IsNAN(v) ? fallback : v;` guard the invalid-value tracer recognises |
+| `m1finite` | the `// @m1:requires-finite` annotation |
+| `m1allow` | the `// @m1:allow(Txxx)` diagnostic suppression |
+
+Loading is opt-in (like conform.nvim / nvim-lint). With
+[LuaSnip](https://github.com/L3MON4D3/LuaSnip), point its `from_vscode` loader
+at the bundled file:
+
+```lua
+require("luasnip.loaders.from_vscode").load({
+  paths = { require("nvim-m1.snippets").dir() },
+})
+```
+
+Engine-free, you can expand one by prefix or name through Neovim's native
+`vim.snippet` (0.10+) — e.g. bind it to a key:
+
+```lua
+vim.keymap.set("i", "<C-g>n", function()
+  require("nvim-m1.snippets").expand("nanguard")
+end, { desc = "M1: insert NaN guard" })
+```
+
 ## Development
 
 ```sh
