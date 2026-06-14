@@ -21,6 +21,14 @@ local M = {}
 ---@type NvimM1Config?
 M.config = nil
 
+--- Set of project-verb command names registered through proj_cmd() (init.lua).
+--- Routing every single-argument m1-project verb through that one helper is what
+--- guarantees the `M.config or config.defaults` fallback can't be forgotten
+--- per verb (#69); this table lets tests assert nothing slipped back to a
+--- hand-rolled registration.
+---@type table<string, boolean>
+M._proj_cmds = {}
+
 --- Register the m1scr/m1prj filetypes. Safe to call repeatedly and before
 --- setup() (the ftdetect/ and plugin/ shims call it so `ft = "m1scr"` lazy
 --- triggers fire).
@@ -170,39 +178,39 @@ local function user_commands()
   -- then). Loop-driven so the fallback can't be forgotten per verb — #69 was two
   -- hand-rolled commands (M1SetType/M1SetUnit) that passed raw M.config and so
   -- indexed nil pre-setup; routing every verb through here makes that impossible.
-  local function proj_cmd(name, fn, desc)
+  -- `suffix` overrides the default " (m1-project)" parenthetical for the rare
+  -- verb that needs an extra hint (e.g. M1DeleteComponent confirms first).
+  local function proj_cmd(name, fn, desc, suffix)
+    M._proj_cmds[name] = true
     vim.api.nvim_create_user_command(name, function()
       project[fn](M.config or config.defaults)
-    end, { desc = "nvim-m1: " .. desc .. " (m1-project)" })
+    end, { desc = "nvim-m1: " .. desc .. (suffix or " (m1-project)") })
   end
 
-  vim.api.nvim_create_user_command("M1CreateChannel", function()
-    project.create_channel(M.config or config.defaults)
-  end, { desc = "nvim-m1: create a channel in Project.m1prj (m1-project)" })
-
-  vim.api.nvim_create_user_command("M1SetSecurity", function()
-    project.set_security(M.config or config.defaults)
-  end, { desc = "nvim-m1: set a component's security level (m1-project)" })
-
+  proj_cmd("M1CreateChannel", "create_channel", "create a channel in Project.m1prj")
+  proj_cmd("M1SetSecurity", "set_security", "set a component's security level")
   proj_cmd("M1SetType", "set_type", "set a component's storage type")
   proj_cmd("M1SetUnit", "set_unit", "set a component's display unit")
-  vim.api.nvim_create_user_command("M1SetCallRate", function()
-    project.set_call_rate(M.config or config.defaults)
-  end, { desc = "nvim-m1: set a script's execution rate (m1-project)" })
+  proj_cmd("M1SetCallRate", "set_call_rate", "set a script's execution rate")
 
   -- #51: the m1-project verbs added through v0.7.0 (create-group, delete/rename-component, validate).
-  vim.api.nvim_create_user_command("M1CreateGroup", function()
-    project.create_group(M.config or config.defaults)
-  end, { desc = "nvim-m1: create a group in Project.m1prj (m1-project)" })
-  vim.api.nvim_create_user_command("M1DeleteComponent", function()
-    project.delete_component(M.config or config.defaults)
-  end, { desc = "nvim-m1: delete a component (m1-project, confirms first)" })
-  vim.api.nvim_create_user_command("M1RenameComponent", function()
-    project.rename_component(M.config or config.defaults)
-  end, { desc = "nvim-m1: rename a component + its trigger references (m1-project)" })
-  vim.api.nvim_create_user_command("M1ValidateProject", function()
-    project.validate(M.config or config.defaults)
-  end, { desc = "nvim-m1: validate Project.m1prj into the quickfix list (m1-project)" })
+  proj_cmd("M1CreateGroup", "create_group", "create a group in Project.m1prj")
+  proj_cmd(
+    "M1DeleteComponent",
+    "delete_component",
+    "delete a component",
+    " (m1-project, confirms first)"
+  )
+  proj_cmd(
+    "M1RenameComponent",
+    "rename_component",
+    "rename a component + its trigger references"
+  )
+  proj_cmd(
+    "M1ValidateProject",
+    "validate",
+    "validate Project.m1prj into the quickfix list"
+  )
 
   -- #61: the remaining m1-project verbs added through v0.7.0 (create-parameter/function, set-quantity/format/dps/display-range/validation, add/remove-tag).
   proj_cmd(
