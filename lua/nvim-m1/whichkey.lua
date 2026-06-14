@@ -30,6 +30,7 @@ function M.register(opts)
     { p .. "g", "<cmd>M1GenerateConfig<cr>", desc = "Generate m1-tools.toml" },
     { p .. "c", "<cmd>M1CreateChannel<cr>", desc = "Create channel" },
     { p .. "s", "<cmd>M1SetSecurity<cr>", desc = "Set security" },
+    { p .. "S", "<cmd>M1SecurityMatrix<cr>", desc = "Security matrix" },
     { p .. "t", "<cmd>M1SetType<cr>", desc = "Set storage type" },
     { p .. "u", "<cmd>M1SetUnit<cr>", desc = "Set display unit" },
     { p .. "r", "<cmd>M1SetCallRate<cr>", desc = "Set call rate" },
