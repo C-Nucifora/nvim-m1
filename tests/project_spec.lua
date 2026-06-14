@@ -527,12 +527,6 @@ describe("nvim-m1 next-gen additions", function()
     assert.is_not_nil(cmds.M1CreateTable)
   end)
 
-  -- The single-argument project verbs must ALL be registered through the
-  -- proj_cmd helper (init.lua), never hand-rolled. The helper bakes in the
-  -- `M.config or config.defaults` fallback so it can't be forgotten per verb —
-  -- #69 was two hand-rolled commands that passed raw M.config and indexed nil
-  -- pre-setup. M._proj_cmds records every name the helper registered; assert the
-  -- previously hand-rolled verbs now appear there (routed, not copy-pasted).
   -- End-to-end (#76): create-constant writes a BuiltIn.Constant.
   it("create_constant adds a constant via the real binary (#76)", function()
     if vim.fn.executable("m1-project") ~= 1 then
