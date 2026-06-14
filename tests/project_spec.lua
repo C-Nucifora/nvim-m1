@@ -11,6 +11,18 @@ describe("nvim-m1.project", function()
     end)
   end)
 
+  it("security_levels falls back to the built-in groups when unqueryable", function()
+    -- A bogus binary path forces the query to fail, so the offered groups are
+    -- the M1 built-in defaults (parity with m1-vscode's fallback). With a real,
+    -- list-security-capable binary and a project, it returns that project's
+    -- declared <SecurityRoles> instead.
+    local levels =
+      project.security_levels({ project_path = "/nonexistent/m1-project-xyz" })
+    assert.is_true(#levels >= 1)
+    assert.is_true(vim.tbl_contains(levels, "Tune"))
+    assert.is_true(vim.tbl_contains(levels, "Resource"))
+  end)
+
   -- #87: notify_reload must use the colon (method) form `client:notify(...)`.
   -- The dot form `client.notify(...)` is deprecated in Neovim 0.12 and a hard
   -- error in 0.13. The colon form passes the client as `self`; assert the fake

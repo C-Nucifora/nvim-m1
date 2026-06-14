@@ -177,7 +177,40 @@ local function list_rates(cfg)
   return vim.split(vim.trim(res.stdout or ""), "\n", { trimempty = true })
 end
 
-local SECURITY = { "Tune", "Calibration", "Master Calibration", "Resource" }
+-- The M1 built-in security groups — the fallback used when the project's
+-- declared <SecurityRoles> can't be queried.
+local DEFAULT_SECURITY = { "Tune", "Calibration", "Master Calibration", "Resource" }
+
+--- The project's declared security groups, via `m1-project list-security`
+--- (parity with the m1-vscode pickers). Falls back to the built-in groups when
+--- the project can't be queried — no project found, m1-project missing, or a
+--- bundled binary that predates the verb — so the prompts and matrix still work.
+---@param cfg NvimM1Config
+---@return string[]
+local function security_levels(cfg)
+  local bin = M.resolve_cmd(cfg)
+  local prj = M.project_file()
+  if not bin or not prj then
+    return DEFAULT_SECURITY
+  end
+  local ok, res = pcall(function()
+    return vim
+      .system({ bin, "list-security", "--project", prj }, { text = true })
+      :wait(5000)
+  end)
+  if not ok or res.code ~= 0 then
+    return DEFAULT_SECURITY
+  end
+  local groups = vim.split(vim.trim(res.stdout or ""), "\n", { trimempty = true })
+  if #groups > 0 then
+    return groups
+  end
+  return DEFAULT_SECURITY
+end
+
+-- Exposed for tests and telescope-m1 parity (cf. M.rates).
+M.security_levels = security_levels
+
 local TYPES = { "(none)", "f32", "f64", "u8", "u16", "u32", "s8", "s16", "s32", "bool" }
 
 --- Prompt for a component path unless the caller (e.g. the telescope-m1
@@ -225,7 +258,7 @@ local function create_typed_component(cfg, opts)
           return
         end
         vim.ui.select(
-          { "(none)", unpack(SECURITY) },
+          { "(none)", unpack(security_levels(cfg)) },
           { prompt = "Security" },
           function(sec)
             if not sec then
@@ -262,7 +295,7 @@ end
 ---@param component? string  Pre-selected component (telescope action).
 function M.set_security(cfg, component)
   with_component(component, function(comp)
-    vim.ui.select(SECURITY, { prompt = "Security" }, function(sec)
+    vim.ui.select(security_levels(cfg), { prompt = "Security" }, function(sec)
       if not sec then
         return
       end
@@ -780,9 +813,8 @@ function M.remove_tag(cfg, component)
   end)
 end
 
---- The access levels, in audit order — mirrors m1-vscode's security-matrix.ts
---- LEVELS so the Neovim and VS Code matrices read identically.
-local LEVELS = { "Tune", "Calibration", "Master Calibration", "Resource" }
+-- The matrix columns are the project's declared security groups (parity with
+-- m1-vscode); resolved per call via security_levels(cfg) in M.security_matrix.
 
 --- :M1SecurityMatrix — render every secured channel/parameter as a
 --- Component × access-level grid, grouped by top-level subsystem, into a
@@ -806,6 +838,9 @@ function M.security_matrix(cfg)
     vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
     return
   end
+
+  -- Columns are the project's declared security groups (built-ins as fallback).
+  local levels = security_levels(cfg)
 
   -- JSON null decodes to vim.NIL, so treat both nil and vim.NIL as "unsecured".
   local secured = {}
@@ -853,7 +888,7 @@ function M.security_matrix(cfg)
 
   local function row(path_cell, cells)
     local parts = { pad(path_cell, path_w) }
-    for i, level in ipairs(LEVELS) do
+    for i, level in ipairs(levels) do
       table.insert(parts, centre(cells[i] or "", #level))
     end
     return table.concat(parts, " | ")
@@ -862,11 +897,11 @@ function M.security_matrix(cfg)
   local lines = {
     ("Security matrix — %d secured component(s)"):format(#secured),
     "",
-    row("Component", LEVELS),
+    row("Component", levels),
   }
   -- A separator that lines up with the header columns.
   local sep_cells = {}
-  for _, level in ipairs(LEVELS) do
+  for _, level in ipairs(levels) do
     sep_cells[#sep_cells + 1] = string.rep("-", #level)
   end
   table.insert(lines, row(string.rep("-", path_w), sep_cells))
@@ -879,7 +914,7 @@ function M.security_matrix(cfg)
     end)
     for _, c in ipairs(groups[group]) do
       local cells = {}
-      for i, level in ipairs(LEVELS) do
+      for i, level in ipairs(levels) do
         cells[i] = (c.security == level) and "X" or ""
       end
       table.insert(lines, row(c.path, cells))
