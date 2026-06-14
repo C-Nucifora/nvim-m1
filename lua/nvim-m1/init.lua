@@ -21,12 +21,14 @@ local M = {}
 ---@type NvimM1Config?
 M.config = nil
 
---- Set of project-verb command names registered through proj_cmd() (init.lua).
---- Routing every single-argument m1-project verb through that one helper is what
---- guarantees the `M.config or config.defaults` fallback can't be forgotten
---- per verb (#69); this table lets tests assert nothing slipped back to a
---- hand-rolled registration.
----@type table<string, boolean>
+--- Project-verb command names registered through proj_cmd() (init.lua), mapped
+--- to the `desc` the helper produced. Routing every single-argument m1-project
+--- verb through that one helper is what guarantees the `M.config or
+--- config.defaults` fallback can't be forgotten per verb (#69); this table lets
+--- tests assert nothing slipped back to a hand-rolled registration without
+--- introspecting Neovim's command registry (whose `definition` field does not
+--- carry a Lua command's `desc` on recent Neovim).
+---@type table<string, string>
 M._proj_cmds = {}
 
 --- Register the m1scr/m1prj filetypes. Safe to call repeatedly and before
@@ -181,10 +183,11 @@ local function user_commands()
   -- `suffix` overrides the default " (m1-project)" parenthetical for the rare
   -- verb that needs an extra hint (e.g. M1DeleteComponent confirms first).
   local function proj_cmd(name, fn, desc, suffix)
-    M._proj_cmds[name] = true
+    local full = "nvim-m1: " .. desc .. (suffix or " (m1-project)")
+    M._proj_cmds[name] = full
     vim.api.nvim_create_user_command(name, function()
       project[fn](M.config or config.defaults)
-    end, { desc = "nvim-m1: " .. desc .. (suffix or " (m1-project)") })
+    end, { desc = full })
   end
 
   proj_cmd("M1CreateChannel", "create_channel", "create a channel in Project.m1prj")

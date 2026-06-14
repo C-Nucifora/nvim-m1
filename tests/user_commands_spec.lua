@@ -8,8 +8,7 @@
 --
 -- This lives in its own spec file so it runs in a fresh nvim process: the e2e
 -- mocks in project_spec.lua leak a stray vim.schedule callback that, on Neovim
--- nightly, would otherwise contaminate any command-introspecting assertion that
--- happens to share its event loop.
+-- nightly, would otherwise contaminate any assertion that shares its event loop.
 describe("nvim-m1 proj_cmd routing", function()
   it("routes every single-arg project verb through the proj_cmd helper", function()
     local m = require("nvim-m1")
@@ -24,31 +23,35 @@ describe("nvim-m1 proj_cmd routing", function()
       "M1RenameComponent",
       "M1ValidateProject",
     }) do
-      assert.is_true(
-        m._proj_cmds[name] == true,
+      assert.is_string(
+        m._proj_cmds[name],
         name .. " must be registered via proj_cmd, not hand-rolled"
+      )
+      -- The command really is registered (any nvim version exposes the name).
+      assert.is_not_nil(
+        vim.api.nvim_get_commands({})[name],
+        name .. " user command exists"
       )
     end
   end)
 
-  -- M1DeleteComponent's "(m1-project, confirms first)" hint can't come from the
-  -- helper's default " (m1-project)" suffix, so proj_cmd takes a suffix override.
-  -- Assert both shapes survive routing: a default-suffix verb and the override.
-  it(
-    "preserves command descriptions through the helper (default + override)",
-    function()
-      require("nvim-m1").setup()
-      local cmds = vim.api.nvim_get_commands({})
-      assert.are.equal(
-        "nvim-m1: rename a component + its trigger references (m1-project)",
-        cmds.M1RenameComponent.definition,
-        "default suffix preserved"
-      )
-      assert.are.equal(
-        "nvim-m1: delete a component (m1-project, confirms first)",
-        cmds.M1DeleteComponent.definition,
-        "suffix override preserved"
-      )
-    end
-  )
+  -- The desc proj_cmd builds is asserted from the helper's own record rather
+  -- than nvim_get_commands().definition, which does not carry a Lua command's
+  -- desc on recent Neovim. M1DeleteComponent's "(m1-project, confirms first)"
+  -- hint can't come from the default " (m1-project)" suffix, so the helper takes
+  -- a suffix override; assert both the default-suffix shape and the override.
+  it("builds the right desc — default suffix and suffix override", function()
+    local m = require("nvim-m1")
+    m.setup()
+    assert.are.equal(
+      "nvim-m1: rename a component + its trigger references (m1-project)",
+      m._proj_cmds.M1RenameComponent,
+      "default suffix"
+    )
+    assert.are.equal(
+      "nvim-m1: delete a component (m1-project, confirms first)",
+      m._proj_cmds.M1DeleteComponent,
+      "suffix override"
+    )
+  end)
 end)
