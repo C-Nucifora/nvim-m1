@@ -1231,3 +1231,124 @@ describe(
     end)
   end
 )
+
+-- create_channel and create_parameter run the exact same name -> type -> unit ->
+-- security prompt cascade and arg-assembly; the only thing that differs is the
+-- subcommand verb. Refactoring them onto one shared helper means that contract
+-- must hold: given identical prompt answers, the spawned command vectors must be
+-- identical except for the verb. This intercepts the spawn (vim.system) so it
+-- needs no real binary and pins the invariant against future drift.
+describe(
+  "nvim-m1.project create_channel / create_parameter share one cascade",
+  function()
+    local project = require("nvim-m1.project")
+    local config = require("nvim-m1.config")
+
+    -- Run `fn` against a throwaway project, feeding the same prompt answers
+    -- (name, type, unit, security) and capturing the command vim.system would
+    -- spawn. Returns the captured command vector (or nil if none was spawned).
+    local function capture_cmd(fn, answers)
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      local prj = dir .. "/Project.m1prj"
+      vim.fn.writefile({
+        '<?xml version="1.0"?>',
+        "<Project>",
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+        "</Project>",
+      }, prj)
+      vim.cmd.edit(dir .. "/Main.m1scr")
+
+      local inputs = { answers.name, answers.unit }
+      local selects = { answers.ty, answers.sec }
+      local orig_input, orig_select = vim.ui.input, vim.ui.select
+      local orig_system = vim.system
+      local captured
+      vim.ui.input = function(_, cb)
+        cb(table.remove(inputs, 1))
+      end
+      vim.ui.select = function(_, _, cb)
+        cb(table.remove(selects, 1))
+      end
+      -- Intercept the spawn: record the command and never actually run it; drive
+      -- the success path so the queue drains and is_idle() goes true.
+      vim.system = function(cmd, _, on_exit)
+        captured = cmd
+        vim.schedule(function()
+          on_exit({ code = 0, stdout = "", stderr = "" })
+        end)
+        return { wait = function() end }
+      end
+
+      local okp = pcall(function()
+        fn(config.resolve())
+      end)
+      vim.wait(2000, function()
+        return project.is_idle()
+      end)
+      vim.ui.input, vim.ui.select, vim.system = orig_input, orig_select, orig_system
+      assert.is_true(okp)
+      -- Strip the `--project <path>` pair (per-run temp dir, not part of the
+      -- cascade under test) so two runs are comparable.
+      if captured then
+        local out = {}
+        local i = 1
+        while i <= #captured do
+          if captured[i] == "--project" then
+            i = i + 2
+          else
+            out[#out + 1] = captured[i]
+            i = i + 1
+          end
+        end
+        captured = out
+      end
+      return captured
+    end
+
+    -- The captured (project-stripped) command is `{ bin, verb, ...rest }`; drop
+    -- the verb (index 2) so the two commands can be compared byte-for-byte.
+    local function without_verb(cmd)
+      local rest = {}
+      for i = 1, #cmd do
+        if i ~= 2 then
+          rest[#rest + 1] = cmd[i]
+        end
+      end
+      return rest
+    end
+
+    it("build identical commands modulo the verb for the same answers", function()
+      local answers = { name = "Root.X", ty = "f32", unit = "rpm", sec = "Tune" }
+      local chan = capture_cmd(project.create_channel, vim.deepcopy(answers))
+      local param = capture_cmd(project.create_parameter, vim.deepcopy(answers))
+
+      assert.is_table(chan, "create_channel should spawn m1-project")
+      assert.is_table(param, "create_parameter should spawn m1-project")
+      assert.equals("create-channel", chan[2])
+      assert.equals("create-parameter", param[2])
+      assert.same(
+        without_verb(chan),
+        without_verb(param),
+        "the two cascades must produce identical args apart from the verb"
+      )
+    end)
+
+    -- The '(none)'/empty guards must be applied identically by both paths.
+    it("both omit type/unit/security args identically when skipped", function()
+      local answers = { name = "Root.Y", ty = "(none)", unit = "", sec = "(none)" }
+      local chan = capture_cmd(project.create_channel, vim.deepcopy(answers))
+      local param = capture_cmd(project.create_parameter, vim.deepcopy(answers))
+
+      assert.same(without_verb(chan), without_verb(param))
+      -- Only `--project <prj> --name Root.Y` should remain — no optional flags.
+      assert.is_nil(
+        vim.tbl_contains(chan, "--type") and "found --type" or nil,
+        "type must be omitted for (none)"
+      )
+      assert.is_falsy(vim.tbl_contains(chan, "--type"))
+      assert.is_falsy(vim.tbl_contains(chan, "--unit"))
+      assert.is_falsy(vim.tbl_contains(chan, "--security"))
+    end)
+  end
+)
