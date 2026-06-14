@@ -880,3 +880,354 @@ describe("nvim-m1.project.validate timeout (#91)", function()
     end)
   end)
 end)
+
+-- #94: end-to-end tests for create_parameter, create_function,
+-- create_scheduled_function.
+describe("nvim-m1.project create_parameter / create_function (#94)", function()
+  -- End-to-end (#94): create_parameter writes a BuiltIn.Parameter component.
+  it("create_parameter adds a parameter via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local project = require("nvim-m1.project")
+    local config = require("nvim-m1.config")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    -- Prompts: name (input), type (select), unit (input, empty), security (select).
+    local inputs = { "Root.Engine.Gain", "" }
+    local selects = { "f32", "(none)" }
+    local orig_input, orig_select = vim.ui.input, vim.ui.select
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    vim.ui.select = function(_, _, cb)
+      cb(table.remove(selects, 1))
+    end
+    local okp = pcall(function()
+      project.create_parameter(config.resolve())
+    end)
+    vim.ui.input, vim.ui.select = orig_input, orig_select
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "create_parameter did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find('Name="Root.Engine.Gain"', 1, true),
+      "parameter inserted:\n" .. written
+    )
+    assert.is_truthy(
+      written:find("BuiltIn.Parameter", 1, true),
+      "as a Parameter:\n" .. written
+    )
+  end)
+
+  -- End-to-end (#94): create_function writes a BuiltIn.MethodUser component.
+  it("create_function adds a function via the real binary", function()
+    if vim.fn.executable("m1-project") ~= 1 then
+      pending("m1-project not on $PATH")
+      return
+    end
+    local project = require("nvim-m1.project")
+    local config = require("nvim-m1.config")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local orig_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb("Root.Engine.Update")
+    end
+    local okp = pcall(function()
+      project.create_function(config.resolve())
+    end)
+    vim.ui.input = orig_input
+    assert.is_true(okp)
+
+    assert.is_true(
+      vim.wait(5000, function()
+        return project.is_idle()
+      end),
+      "create_function did not finish within 5s"
+    )
+
+    local written = table.concat(vim.fn.readfile(prj), "\n")
+    assert.is_truthy(
+      written:find('Name="Root.Engine.Update"', 1, true),
+      "function inserted:\n" .. written
+    )
+  end)
+
+  -- End-to-end (#94): create_scheduled_function writes a scheduled variant.
+  it(
+    "create_scheduled_function adds a scheduled function via the real binary",
+    function()
+      if vim.fn.executable("m1-project") ~= 1 then
+        pending("m1-project not on $PATH")
+        return
+      end
+      local project = require("nvim-m1.project")
+      local config = require("nvim-m1.config")
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      local prj = dir .. "/Project.m1prj"
+      vim.fn.writefile({
+        '<?xml version="1.0"?>',
+        "<Project>",
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+        "</Project>",
+      }, prj)
+      vim.cmd.edit(dir .. "/Main.m1scr")
+
+      local orig_input = vim.ui.input
+      vim.ui.input = function(_, cb)
+        cb("Root.Engine.Tick")
+      end
+      local okp = pcall(function()
+        project.create_scheduled_function(config.resolve())
+      end)
+      vim.ui.input = orig_input
+      assert.is_true(okp)
+
+      assert.is_true(
+        vim.wait(5000, function()
+          return project.is_idle()
+        end),
+        "create_scheduled_function did not finish within 5s"
+      )
+
+      local written = table.concat(vim.fn.readfile(prj), "\n")
+      assert.is_truthy(
+        written:find('Name="Root.Engine.Tick"', 1, true),
+        "scheduled function inserted:\n" .. written
+      )
+    end
+  )
+end)
+
+-- #95: end-to-end tests for set_security, set_type, set_unit and the
+-- interactive :M1SetCallRate command.
+describe(
+  "nvim-m1.project set_security / set_type / set_unit / set_call_rate (#95)",
+  function()
+    -- End-to-end (#95): set_security writes a security attribute on a component.
+    it("set_security writes a security level via the real binary", function()
+      if vim.fn.executable("m1-project") ~= 1 then
+        pending("m1-project not on $PATH")
+        return
+      end
+      local project = require("nvim-m1.project")
+      local config = require("nvim-m1.config")
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      local prj = dir .. "/Project.m1prj"
+      vim.fn.writefile({
+        '<?xml version="1.0"?>',
+        "<Project>",
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+        '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+        "</Project>",
+      }, prj)
+      vim.cmd.edit(dir .. "/Main.m1scr")
+
+      -- with_component prompts for a name (input), then security level (select).
+      local inputs = { "Root.Engine.Speed" }
+      local selects = { "Tune" }
+      local orig_input, orig_select = vim.ui.input, vim.ui.select
+      vim.ui.input = function(_, cb)
+        cb(table.remove(inputs, 1))
+      end
+      vim.ui.select = function(_, _, cb)
+        cb(table.remove(selects, 1))
+      end
+      local okp = pcall(function()
+        project.set_security(config.resolve())
+      end)
+      vim.ui.input, vim.ui.select = orig_input, orig_select
+      assert.is_true(okp)
+
+      assert.is_true(
+        vim.wait(5000, function()
+          return project.is_idle()
+        end),
+        "set_security did not finish within 5s"
+      )
+
+      local written = table.concat(vim.fn.readfile(prj), "\n")
+      assert.is_truthy(written:find("Tune", 1, true), "security written:\n" .. written)
+    end)
+
+    -- End-to-end (#95): set_type changes the storage type of a component.
+    it("set_type writes a storage type via the real binary", function()
+      if vim.fn.executable("m1-project") ~= 1 then
+        pending("m1-project not on $PATH")
+        return
+      end
+      local project = require("nvim-m1.project")
+      local config = require("nvim-m1.config")
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      local prj = dir .. "/Project.m1prj"
+      vim.fn.writefile({
+        '<?xml version="1.0"?>',
+        "<Project>",
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+        '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Count"><Props Type="f32"/></Component>',
+        "</Project>",
+      }, prj)
+      vim.cmd.edit(dir .. "/Main.m1scr")
+
+      -- with_component prompts for a name (input), then type (select).
+      local inputs = { "Root.Engine.Count" }
+      local selects = { "u32" }
+      local orig_input, orig_select = vim.ui.input, vim.ui.select
+      vim.ui.input = function(_, cb)
+        cb(table.remove(inputs, 1))
+      end
+      vim.ui.select = function(_, _, cb)
+        cb(table.remove(selects, 1))
+      end
+      local okp = pcall(function()
+        project.set_type(config.resolve())
+      end)
+      vim.ui.input, vim.ui.select = orig_input, orig_select
+      assert.is_true(okp)
+
+      assert.is_true(
+        vim.wait(5000, function()
+          return project.is_idle()
+        end),
+        "set_type did not finish within 5s"
+      )
+
+      local written = table.concat(vim.fn.readfile(prj), "\n")
+      assert.is_truthy(
+        written:find('Type="u32"', 1, true),
+        "type written:\n" .. written
+      )
+    end)
+
+    -- End-to-end (#95): set_unit writes a display unit onto a component.
+    it("set_unit writes a display unit via the real binary", function()
+      if vim.fn.executable("m1-project") ~= 1 then
+        pending("m1-project not on $PATH")
+        return
+      end
+      local project = require("nvim-m1.project")
+      local config = require("nvim-m1.config")
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      local prj = dir .. "/Project.m1prj"
+      vim.fn.writefile({
+        '<?xml version="1.0"?>',
+        "<Project>",
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+        '  <Component Classname="BuiltIn.Channel" Name="Root.Engine.Speed"><Props Type="f32"/></Component>',
+        "</Project>",
+      }, prj)
+      vim.cmd.edit(dir .. "/Main.m1scr")
+
+      -- with_component prompts for a name (input), then unit (input).
+      local inputs = { "Root.Engine.Speed", "rpm" }
+      local orig_input = vim.ui.input
+      vim.ui.input = function(_, cb)
+        cb(table.remove(inputs, 1))
+      end
+      local okp = pcall(function()
+        project.set_unit(config.resolve())
+      end)
+      vim.ui.input = orig_input
+      assert.is_true(okp)
+
+      assert.is_true(
+        vim.wait(5000, function()
+          return project.is_idle()
+        end),
+        "set_unit did not finish within 5s"
+      )
+
+      local written = table.concat(vim.fn.readfile(prj), "\n")
+      assert.is_truthy(written:find("rpm", 1, true), "unit written:\n" .. written)
+    end)
+
+    -- End-to-end (#95): :M1SetCallRate (the interactive command) prompts for a
+    -- script name and an execution rate, then writes the association to .m1prj.
+    it("set_call_rate writes a call rate via the real binary", function()
+      if vim.fn.executable("m1-project") ~= 1 then
+        pending("m1-project not on $PATH")
+        return
+      end
+      local project = require("nvim-m1.project")
+      local config = require("nvim-m1.config")
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, "p")
+      local prj = dir .. "/Project.m1prj"
+      vim.fn.writefile({
+        '<?xml version="1.0"?>',
+        "<Project>",
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
+        '  <Component Classname="BuiltIn.MethodUser" Name="Root.Engine.Update"/>',
+        '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Events"/>',
+        '  <Component Classname="BuiltIn.EventKernel" Name="Root.Events.On 100Hz"/>',
+        "</Project>",
+      }, prj)
+      vim.cmd.edit(dir .. "/Main.m1scr")
+
+      -- set_call_rate prompts for a script name (input), then rate (select).
+      local orig_input, orig_select = vim.ui.input, vim.ui.select
+      vim.ui.input = function(_, cb)
+        cb("Root.Engine.Update")
+      end
+      vim.ui.select = function(_, _, cb)
+        cb("100Hz")
+      end
+      local okp = pcall(function()
+        project.set_call_rate(config.resolve())
+      end)
+      vim.ui.input, vim.ui.select = orig_input, orig_select
+      assert.is_true(okp)
+
+      assert.is_true(
+        vim.wait(5000, function()
+          return project.is_idle()
+        end),
+        "set_call_rate did not finish within 5s"
+      )
+
+      local written = table.concat(vim.fn.readfile(prj), "\n")
+      assert.is_truthy(
+        written:find("100Hz", 1, true),
+        "call rate written:\n" .. written
+      )
+    end)
+  end
+)
