@@ -292,6 +292,9 @@ end
 --- self-heal). Filetype/command/augroup registration is overwrite-safe and
 --- re-runs every call; the self-heal must not, or repeated setup() calls would
 --- re-schedule overlapping install.install() runs that race each other. (#26)
+--- This guards only repeated setup() calls; a self-heal overlapping a manual
+--- :M1Install/:M1Update is serialised at the install layer by the in-flight
+--- guard in install.install_async.
 M._setup_done = false
 
 --- Configure M1 script support. Idempotent.

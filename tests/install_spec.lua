@@ -330,4 +330,96 @@ describe("nvim-m1.install", function()
       assert.same({}, install.stale_tools())
     end)
   end)
+
+  describe("install_async in-flight guard (single concurrent run)", function()
+    -- The first-open self-heal and a user :M1Install both call install_async,
+    -- each shelling `curl -o <dest>` to the SAME bundled binary path and
+    -- rewriting the SAME .installed.json. Two overlapping runs can corrupt a
+    -- binary / leave the manifest inconsistent. install_async must serialise:
+    -- while one chain is downloading, a second call is a no-op (on_done(false))
+    -- and starts no extra fetch_async.
+    local saved_fetch, saved_notify
+
+    before_each(function()
+      saved_fetch = install.fetch_async
+      saved_notify = vim.notify
+      vim.notify = function() end
+    end)
+    after_each(function()
+      install.fetch_async = saved_fetch
+      vim.notify = saved_notify
+    end)
+
+    it("a second install_async while one is in flight is a no-op", function()
+      local fetches = 0
+      local release_first -- completes the first run's pending fetch when called
+      install.fetch_async = function(_, cb)
+        fetches = fetches + 1
+        release_first = function()
+          cb(true)
+        end
+      end
+
+      local first_done, second_done
+      install.install_async({ "m1-lint" }, function(ok)
+        first_done = ok
+      end)
+      -- The first run is now parked inside fetch_async (cb not yet invoked).
+      assert.equals(1, fetches, "the first run must have started its download")
+
+      -- A second call lands while the first is still in flight: it must NOT
+      -- start another fetch, and must report failure rather than racing.
+      install.install_async({ "m1-lint" }, function(ok)
+        second_done = ok
+      end)
+      assert.equals(1, fetches, "the in-flight guard must block a second download")
+      assert.is_false(second_done, "the overlapping call must report on_done(false)")
+      assert.is_nil(first_done, "the first run must still be in flight")
+
+      -- Let the first run finish; it succeeds, and the guard is released so a
+      -- fresh install can run again afterwards.
+      release_first()
+      assert.is_true(first_done, "the first run must complete normally")
+
+      release_first = nil
+      install.install_async({ "m1-lint" }, function() end)
+      assert.equals(
+        2,
+        fetches,
+        "after the in-flight run finishes the guard must be cleared"
+      )
+      if release_first then
+        release_first()
+      end
+    end)
+
+    it("clears the in-flight guard on the platform-failure early return", function()
+      -- A platform() failure returns before any fetch, on_done(false). It must
+      -- still clear the guard, or a single early failure would wedge every
+      -- later install.
+      local saved_platform = install.platform
+      install.platform = function()
+        return nil, "", "no prebuilt binaries for this platform"
+      end
+      local failed
+      install.install_async({ "m1-lint" }, function(ok)
+        failed = ok
+      end)
+      install.platform = saved_platform
+      assert.is_false(failed, "a platform failure reports on_done(false)")
+
+      -- A subsequent real install must proceed (guard cleared).
+      local fetches = 0
+      install.fetch_async = function(_, cb)
+        fetches = fetches + 1
+        cb(true)
+      end
+      install.install_async({ "m1-lint" }, function() end)
+      assert.equals(
+        1,
+        fetches,
+        "the guard must be cleared after a platform-failure early return"
+      )
+    end)
+  end)
 end)
