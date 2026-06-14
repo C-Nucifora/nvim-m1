@@ -89,6 +89,7 @@ Generate one via `:M1GenerateConfig`.
 | `:M1AddTag` / `:M1RemoveTag` | Add or remove a System/Type tag. |
 | `:M1RenameComponent` / `:M1DeleteComponent` | Rename (updating trigger references) or delete a component. |
 | `:M1ValidateProject` | Validate `Project.m1prj` structure into the quickfix list. |
+| `:M1SecurityMatrix` | Show the secured components × access-level audit matrix (read-only scratch buffer). |
 | `:M1Install` / `:M1Update` | Download the bundled toolchain at the pinned versions. |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 

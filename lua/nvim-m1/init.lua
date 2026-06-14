@@ -214,6 +214,15 @@ local function user_commands()
     "validate",
     "validate Project.m1prj into the quickfix list"
   )
+  -- #102: the pre-competition security-matrix audit view (parity with
+  -- m1-vscode's m1.showSecurityMatrix). Renders into a read-only scratch
+  -- buffer, so the suffix notes it's a view rather than a mutation.
+  proj_cmd(
+    "M1SecurityMatrix",
+    "security_matrix",
+    "show the secured-component security matrix",
+    " (m1-project, audit view)"
+  )
 
   -- #61: the remaining m1-project verbs added through v0.7.0 (create-parameter/function, set-quantity/format/dps/display-range/validation, add/remove-tag).
   proj_cmd(

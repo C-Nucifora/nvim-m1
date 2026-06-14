@@ -310,12 +310,15 @@ function M.set_unit(cfg, component)
   end)
 end
 
---- All component paths via `list-components --json`. Shared by the pickers in
---- the delete/rename commands; telescope-m1's components picker remains the
---- richer entry point and can preselect via the `component` arguments below.
+--- Every component entry from `list-components --json` (path/classname/type/
+--- unit/security/call_rate/…), decoded. Shared by `component_paths` (the
+--- delete/rename pickers, which need only the paths) and `security_matrix`
+--- (which needs path + security). Centralising the spawn + parse keeps the argv
+--- and the #68 degrade-on-hang behaviour in one place.
 ---@param cfg NvimM1Config
----@return string[]
-local function component_paths(cfg)
+---@return table[]  Decoded entries; empty on any failure (missing binary, hung
+---                 subprocess, non-zero exit, or unparseable output).
+local function component_entries(cfg)
   local bin = M.resolve_cmd(cfg)
   local prj = M.project_file()
   if not bin or not prj then
@@ -323,7 +326,7 @@ local function component_paths(cfg)
   end
   -- :wait() pumps the loop instead of hard-blocking, and the timeout degrades a
   -- hung subprocess to an empty list rather than freezing the editor (#68).
-  -- pick_component() needs these synchronously to populate vim.ui.select.
+  -- Callers need these synchronously (to populate vim.ui.select / the matrix).
   local ran, res = pcall(function()
     return vim
       .system({ bin, "list-components", "--project", prj, "--json" }, { text = true })
@@ -337,11 +340,24 @@ local function component_paths(cfg)
   if not ok or type(decoded) ~= "table" then
     return {}
   end
-  local paths = {}
+  local entries = {}
   for _, entry in ipairs(decoded) do
     if type(entry) == "table" and entry.path then
-      table.insert(paths, entry.path)
+      table.insert(entries, entry)
     end
+  end
+  return entries
+end
+
+--- All component paths via `list-components --json`. Shared by the pickers in
+--- the delete/rename commands; telescope-m1's components picker remains the
+--- richer entry point and can preselect via the `component` arguments below.
+---@param cfg NvimM1Config
+---@return string[]
+local function component_paths(cfg)
+  local paths = {}
+  for _, entry in ipairs(component_entries(cfg)) do
+    table.insert(paths, entry.path)
   end
   return paths
 end
@@ -762,6 +778,125 @@ function M.remove_tag(cfg, component)
       )
     end)
   end)
+end
+
+--- The access levels, in audit order — mirrors m1-vscode's security-matrix.ts
+--- LEVELS so the Neovim and VS Code matrices read identically.
+local LEVELS = { "Tune", "Calibration", "Master Calibration", "Resource" }
+
+--- :M1SecurityMatrix — render every secured channel/parameter as a
+--- Component × access-level grid, grouped by top-level subsystem, into a
+--- read-only scratch buffer (#102). Parity with m1-vscode's
+--- `m1.showSecurityMatrix` (vscode #78) — the pre-competition audit view of
+--- which calibrateable items are exposed at which security level.
+---
+--- Built from the same `list-components --json` payload the VS Code view
+--- consumes; only path + security are needed (the rest of the entry is ignored).
+--- The server stays read-only: this writes nothing, just a scratch buffer.
+---@param cfg NvimM1Config
+function M.security_matrix(cfg)
+  if not M.resolve_cmd(cfg) then
+    vim.notify(
+      "nvim-m1: m1-project not found (set opts.project_path or install it on $PATH)",
+      vim.log.levels.ERROR
+    )
+    return
+  end
+  if not M.project_file() then
+    vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
+    return
+  end
+
+  -- JSON null decodes to vim.NIL, so treat both nil and vim.NIL as "unsecured".
+  local secured = {}
+  for _, entry in ipairs(component_entries(cfg)) do
+    local sec = entry.security
+    if sec ~= nil and sec ~= vim.NIL and type(sec) == "string" and sec ~= "" then
+      table.insert(secured, { path = entry.path, security = sec })
+    end
+  end
+
+  if #secured == 0 then
+    vim.notify("nvim-m1: no secured components in this project")
+    return
+  end
+
+  -- Group by the path's 2nd segment (Root.<Subsystem>.…), mirroring
+  -- security-matrix.ts; a 2-segment path (Root.X) has no subsystem.
+  local groups, order = {}, {}
+  for _, c in ipairs(secured) do
+    local seg = vim.split(c.path, ".", { plain = true })
+    local group = #seg > 2 and seg[2] or "(top level)"
+    if not groups[group] then
+      groups[group] = {}
+      table.insert(order, group)
+    end
+    table.insert(groups[group], c)
+  end
+  table.sort(order)
+
+  -- Column widths: the path column fits the longest path; each level column
+  -- fits its header. A centred "X" marks the component's level.
+  local path_w = #"Component"
+  for _, c in ipairs(secured) do
+    path_w = math.max(path_w, #c.path)
+  end
+  local function pad(s, w)
+    return s .. string.rep(" ", math.max(0, w - #s))
+  end
+  local function centre(s, w)
+    local left = math.floor((w - #s) / 2)
+    return string.rep(" ", math.max(0, left))
+      .. s
+      .. string.rep(" ", math.max(0, w - #s - left))
+  end
+
+  local function row(path_cell, cells)
+    local parts = { pad(path_cell, path_w) }
+    for i, level in ipairs(LEVELS) do
+      table.insert(parts, centre(cells[i] or "", #level))
+    end
+    return table.concat(parts, " | ")
+  end
+
+  local lines = {
+    ("Security matrix — %d secured component(s)"):format(#secured),
+    "",
+    row("Component", LEVELS),
+  }
+  -- A separator that lines up with the header columns.
+  local sep_cells = {}
+  for _, level in ipairs(LEVELS) do
+    sep_cells[#sep_cells + 1] = string.rep("-", #level)
+  end
+  table.insert(lines, row(string.rep("-", path_w), sep_cells))
+
+  for _, group in ipairs(order) do
+    table.insert(lines, "")
+    table.insert(lines, group .. ":")
+    table.sort(groups[group], function(a, b)
+      return a.path < b.path
+    end)
+    for _, c in ipairs(groups[group]) do
+      local cells = {}
+      for i, level in ipairs(LEVELS) do
+        cells[i] = (c.security == level) and "X" or ""
+      end
+      table.insert(lines, row(c.path, cells))
+    end
+  end
+
+  -- Render into a read-only scratch buffer (#102): nofile/wipe/non-modifiable,
+  -- so the audit view never writes to disk and the server stays read-only.
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_name(buf, "M1 Security Matrix")
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].modified = false
+  vim.api.nvim_set_current_buf(buf)
 end
 
 return M
