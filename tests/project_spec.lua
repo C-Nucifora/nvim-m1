@@ -1300,6 +1300,21 @@ describe(
       -- Intercept the spawn: record the command and never actually run it; drive
       -- the success path so the queue drains and is_idle() goes true.
       vim.system = function(cmd, _, on_exit)
+        -- The Security prompt probes `list-security` synchronously (:wait, #106).
+        -- Answer it with the built-in groups so the cascade proceeds, and don't
+        -- let the probe overwrite the capture — only the create-* spawn (with an
+        -- on_exit callback) is the command under test.
+        if cmd[2] == "list-security" then
+          return {
+            wait = function()
+              return {
+                code = 0,
+                stdout = "Tune\nCalibration\nMaster Calibration\nResource\n",
+                stderr = "",
+              }
+            end,
+          }
+        end
         captured = cmd
         vim.schedule(function()
           on_exit({ code = 0, stdout = "", stderr = "" })

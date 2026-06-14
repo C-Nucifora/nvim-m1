@@ -58,10 +58,20 @@ describe("nvim-m1.project.security_matrix", function()
           security = vim.NIL,
         },
       })
-      -- The synchronous (:wait) list-components call site returns this payload.
-      vim.system = function()
+      -- Two synchronous (:wait) call sites now: the matrix sources its *columns*
+      -- from `list-security` (#106) and its *rows* from `list-components`. Answer
+      -- each by verb — the built-in groups for the columns, the payload for the
+      -- rows — so the probe doesn't swallow the components JSON as a bogus level.
+      vim.system = function(cmd)
         return {
           wait = function()
+            if cmd[2] == "list-security" then
+              return {
+                code = 0,
+                stdout = "Tune\nCalibration\nMaster Calibration\nResource\n",
+                stderr = "",
+              }
+            end
             return { code = 0, stdout = payload, stderr = "" }
           end,
         }
