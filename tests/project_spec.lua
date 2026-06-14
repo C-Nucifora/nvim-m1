@@ -689,6 +689,21 @@ describe("nvim-m1 next-gen additions", function()
   it("which-key registration is a silent no-op without which-key (#48)", function()
     assert.is_false(require("nvim-m1.whichkey").register())
   end)
+
+  -- which-key v2 exposes `register`, not the v3 `add`. require() succeeds, so
+  -- guarding only on the module being absent isn't enough — calling wk.add on
+  -- v2 would raise "attempt to call a nil value (field add)". register() must
+  -- detect the unusable API and fall back to its documented silent no-op.
+  it("which-key registration is a silent no-op on which-key v2 (#48)", function()
+    local saved = package.loaded["which-key"]
+    package.loaded["which-key"] = { register = function() end } -- v2: no `add`
+    local ok, ret = pcall(function()
+      return require("nvim-m1.whichkey").register()
+    end)
+    package.loaded["which-key"] = saved
+    assert.is_true(ok, "register() must not error on which-key v2")
+    assert.is_false(ret, "register() must return false when wk.add is missing")
+  end)
 end)
 
 describe("nvim-m1.project.set_call_rate_for (#26 in telescope-m1.nvim)", function()
