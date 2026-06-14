@@ -9,6 +9,24 @@ local M = {}
 local NS = vim.api.nvim_create_namespace("nvim-m1-lint")
 local GROUP = "NvimM1Lint"
 
+--- The namespace the standalone fallback linter publishes into. Exposed for
+--- tests and for callers that need to clear a stale standalone run (e.g. when
+--- m1-lsp attaches late and takes over linting). (#25)
+---@return integer
+function M.namespace()
+  return NS
+end
+
+--- Drop any standalone diagnostics this plugin published for `bufnr`. Used when
+--- m1-lsp takes over linting after a standalone run, so the same warnings don't
+--- linger doubled. (#25)
+---@param bufnr integer
+local function clear_ns(bufnr)
+  if vim.api.nvim_buf_is_valid(bufnr) then
+    vim.diagnostic.reset(NS, bufnr)
+  end
+end
+
 --- Map an m1-lint severity string to a vim.diagnostic severity.
 ---@param sev string
 ---@return integer
@@ -167,8 +185,12 @@ end
 function M.lint(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   -- Defer to m1-lsp when it is attached: it serves the same lint diagnostics, so
-  -- running the standalone linter too would publish every warning twice. (#25)
+  -- running the standalone linter too would publish every warning twice. Also
+  -- drop any diagnostics an EARLIER standalone run left behind — once the LSP is
+  -- up M.lint bails here before run_builtin, so a re-read/save would never clear
+  -- the stale set on its own, leaving it doubled against the LSP's. (#25)
   if M.lsp_attached(bufnr) then
+    clear_ns(bufnr)
     return
   end
   local ok, nvim_lint = pcall(require, "lint")
@@ -200,6 +222,22 @@ function M.setup(cfg)
   -- Manual linting (:M1Lint) works regardless of the save hook.
   local group = vim.api.nvim_create_augroup(GROUP, { clear = true })
 
+  -- Clear the standalone namespace the moment m1-lsp attaches: if the server was
+  -- unresolvable when an .m1scr buffer was first read, the standalone runner
+  -- already published into NS; the LSP then publishes the same lint diagnostics
+  -- through its own namespace, so without this the warnings show twice until the
+  -- buffer is re-read. Wired even when lint-on-save is off — a stale standalone
+  -- set can predate a config change. (#25, late-attach timeline)
+  vim.api.nvim_create_autocmd("LspAttach", {
+    group = group,
+    desc = "nvim-m1: clear standalone lint diagnostics when m1-lsp takes over",
+    callback = function(args)
+      if M.lsp_attached(args.buf) then
+        clear_ns(args.buf)
+      end
+    end,
+  })
+
   if not cfg.lint_on_save then
     return
   end
@@ -226,6 +264,9 @@ function M.setup(cfg)
       -- `cfg` is the latest setup()'s config: the augroup is cleared and the
       -- hook re-registered on every setup(), so this closure always sees it.
       if M.lsp_will_lint(args.buf, cfg) then
+        -- Deferring to the LSP — drop anything a prior standalone run published
+        -- so it isn't doubled against the server's diagnostics. (#25)
+        clear_ns(args.buf)
         return
       end
       M.lint(args.buf)
