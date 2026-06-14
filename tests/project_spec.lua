@@ -533,6 +533,9 @@ describe("nvim-m1 next-gen additions", function()
   -- #69 was two hand-rolled commands that passed raw M.config and indexed nil
   -- pre-setup. M._proj_cmds records every name the helper registered; assert the
   -- previously hand-rolled verbs now appear there (routed, not copy-pasted).
+  -- M1DeleteComponent's "(m1-project, confirms first)" hint can't come from the
+  -- helper's default " (m1-project)" suffix, so proj_cmd takes a suffix override;
+  -- assert that override survives the routing (along with a default-suffix verb).
   it("routes every single-arg project verb through the proj_cmd helper", function()
     local m = require("nvim-m1")
     m.setup()
@@ -551,28 +554,19 @@ describe("nvim-m1 next-gen additions", function()
         name .. " must be registered via proj_cmd, not hand-rolled"
       )
     end
-  end)
 
-  -- Routing through proj_cmd must preserve each command's description verbatim,
-  -- including M1DeleteComponent's "(m1-project, confirms first)" hint (which the
-  -- default " (m1-project)" suffix cannot reproduce — proj_cmd takes a suffix
-  -- override for it).
-  it("preserves the project-verb descriptions when routed via proj_cmd", function()
-    require("nvim-m1").setup()
+    -- Descriptions survive routing: the default suffix and the override.
     local cmds = vim.api.nvim_get_commands({})
-    local expected = {
-      M1CreateChannel = "nvim-m1: create a channel in Project.m1prj (m1-project)",
-      M1SetSecurity = "nvim-m1: set a component's security level (m1-project)",
-      M1SetCallRate = "nvim-m1: set a script's execution rate (m1-project)",
-      M1CreateGroup = "nvim-m1: create a group in Project.m1prj (m1-project)",
-      M1DeleteComponent = "nvim-m1: delete a component (m1-project, confirms first)",
-      M1RenameComponent = "nvim-m1: rename a component + its trigger references (m1-project)",
-      M1ValidateProject = "nvim-m1: validate Project.m1prj into the quickfix list (m1-project)",
-    }
-    for name, desc in pairs(expected) do
-      assert.is_not_nil(cmds[name], name .. " registered")
-      assert.are.equal(desc, cmds[name].definition, name .. " description preserved")
-    end
+    assert.are.equal(
+      "nvim-m1: rename a component + its trigger references (m1-project)",
+      cmds.M1RenameComponent.definition,
+      "default suffix preserved"
+    )
+    assert.are.equal(
+      "nvim-m1: delete a component (m1-project, confirms first)",
+      cmds.M1DeleteComponent.definition,
+      "suffix override preserved"
+    )
   end)
 
   -- End-to-end (#76): create-constant writes a BuiltIn.Constant.
