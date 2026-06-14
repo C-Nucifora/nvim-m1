@@ -1,7 +1,8 @@
 --- nvim-m1: optional which-key registration (#48).
 ---
 --- Adds labelled bindings for the :M1* commands under a prefix (default
---- `<leader>m`) when which-key is installed; a silent no-op otherwise.
+--- `<leader>m`) when which-key (v3, with the `add` API) is installed; a silent
+--- no-op otherwise (which-key absent, or an older v2 with no `add`).
 ---
 ---   require("nvim-m1.whichkey").register()              -- <leader>m…
 ---   require("nvim-m1.whichkey").register({ prefix = "<leader>k" })
@@ -11,6 +12,13 @@ local M = {}
 function M.register(opts)
   local ok, wk = pcall(require, "which-key")
   if not ok then
+    return false
+  end
+  -- `wk.add` is the which-key v3 API. v2 (and any future shape without it)
+  -- exposes a different surface (`wk.register`); calling the missing `add`
+  -- would raise "attempt to call a nil value". Guard on the API, not just the
+  -- module, so an unusable which-key stays the documented silent no-op.
+  if type(wk.add) ~= "function" then
     return false
   end
   local p = (opts and opts.prefix) or "<leader>m"
