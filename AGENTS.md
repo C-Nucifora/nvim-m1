@@ -34,7 +34,10 @@ provisioning, conform/nvim-lint integration, `:M1*` commands).
   *registration*, not just a runtime check, or you get duplicate
   lint diagnostics.
 - A live `m1-lsp` keeps running across a toolchain update; stale behaviour
-  after `:M1Update` usually needs `:LspRestart`, not debugging.
+  after `:M1Update` usually needs `:M1RestartServer` (a full stop+re-attach,
+  available on every supported Neovim), not debugging. Don't reach for
+  nvim-lspconfig's `:LspRestart` — it doesn't exist on the native `vim.lsp`
+  path this plugin prefers on 0.11+.
 - Nested `vim.wait()` deadlocks headless Neovim — keep the test suite free
   of it.
 - `vim.api.nvim_exec2` returns its output under the `output` key.
