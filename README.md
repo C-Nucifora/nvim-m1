@@ -91,6 +91,7 @@ Generate one via `:M1GenerateConfig`.
 | `:M1ValidateProject` | Validate `Project.m1prj` structure into the quickfix list. |
 | `:M1SecurityMatrix` | Show the secured components × access-level audit matrix (read-only scratch buffer). |
 | `:M1Install` / `:M1Update` | Download the bundled toolchain at the pinned versions. |
+| `:M1RestartServer` | Restart the `m1-lsp` server (use after `:M1Update` to cycle a stale process). |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
 The project-editing commands drive `Project.m1prj` through the

@@ -101,4 +101,49 @@ function M.setup(cfg)
   return true
 end
 
+--- Restart the running m1-lsp server: stop every client this plugin started,
+--- then re-enable so it re-attaches to the open M1 buffers. This is the cycle a
+--- *stale* server needs after `:M1Update` swaps the bundled binary — re-running
+--- setup() alone (as the install self-heal does) re-enables without stopping,
+--- leaving the already-running old process in place. Drives the native (0.11+)
+--- `vim.lsp.enable` path and the nvim-lspconfig fallback alike, so it works on
+--- every supported Neovim (unlike `:LspRestart`, which only exists when
+--- nvim-lspconfig is installed).
+---@param cfg NvimM1Config
+---@return boolean ok, string? reason
+function M.restart(cfg)
+  local ids = {}
+  for _, c in ipairs(vim.lsp.get_clients({ name = M.client_name })) do
+    ids[#ids + 1] = c.id
+  end
+
+  -- Force-stop the live clients so a hung/old binary can't block the restart.
+  if #ids > 0 then
+    vim.lsp.stop_client(ids, true)
+    -- Re-enable only once the old clients have fully exited: neither
+    -- vim.lsp.enable nor lspconfig will spawn a second server while the old one
+    -- is still around. A single (non-nested) vim.wait pumps the loop here.
+    local stopped = vim.wait(5000, function()
+      return #vim.lsp.get_clients({ name = M.client_name }) == 0
+    end, 50)
+    if not stopped then
+      return false, "m1-lsp did not stop within 5s"
+    end
+  end
+
+  if has_native_api() then
+    -- Toggle off→on so the autocmd that attaches the config to matching buffers
+    -- re-fires against the already-open M1 buffers.
+    vim.lsp.enable(M.client_name, false)
+    vim.lsp.enable(M.client_name)
+    return true
+  end
+
+  -- lspconfig fallback: m1lsp is already configured; re-run its (idempotent)
+  -- setup and replay FileType so lspconfig re-attaches to the open M1 buffers.
+  M.setup(cfg)
+  vim.cmd("silent! doautoall FileType")
+  return true
+end
+
 return M

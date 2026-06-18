@@ -272,6 +272,23 @@ local function user_commands()
     end,
     { desc = "nvim-m1: re-download the bundled M1 toolchain at the pinned versions" }
   )
+
+  -- Parity with m1-vscode's `m1.restartServer`. A live m1-lsp keeps running
+  -- across a toolchain update, so stale behaviour after :M1Update needs a full
+  -- stop+re-attach to cycle the process — and on the native (0.11+) LSP path
+  -- this plugin prefers, nvim-lspconfig's :LspRestart isn't available. This
+  -- command works on every supported Neovim.
+  vim.api.nvim_create_user_command("M1RestartServer", function()
+    local ok, reason = lsp.restart(M.config or config.defaults)
+    if ok then
+      vim.notify("nvim-m1: m1-lsp restarted")
+    else
+      vim.notify(
+        "nvim-m1: could not restart m1-lsp: " .. (reason or "unknown"),
+        vim.log.levels.ERROR
+      )
+    end
+  end, { desc = "nvim-m1: restart the m1-lsp server (use after :M1Update)" })
 end
 
 --- Download the given tools (default: all) WITHOUT blocking the editor, then
