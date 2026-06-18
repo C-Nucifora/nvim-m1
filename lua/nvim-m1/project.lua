@@ -282,6 +282,58 @@ local function create_typed_component(cfg, opts)
   end)
 end
 
+--- Shared shape for the single-field component setters (:M1SetUnit,
+--- :M1SetQuantity, :M1SetFormat, :M1SetDps, :M1AddTag, :M1RemoveTag): pick the
+--- component (unless the caller already knows it), prompt once for a non-empty
+--- value, then run `m1-project <verb> --component <comp> <flag> <value>`. They
+--- differ only by prompt text, verb, flag, and the success-toast wording —
+--- exactly the copy-paste cluster that create_typed_component already removed for
+--- the multi-step creators. Centralising it means a fix to the non-empty guard or
+--- the run() call lands in every setter at once.
+---@param cfg NvimM1Config
+---@param component? string  Pre-selected component (telescope action).
+---@param spec { prompt: string, verb: string, flag: string, toast: fun(comp: string, value: string): string }
+local function value_setter(cfg, component, spec)
+  with_component(component, function(comp)
+    vim.ui.input({ prompt = spec.prompt }, function(value)
+      if not value or value == "" then
+        return
+      end
+      run(
+        cfg,
+        { spec.verb, "--component", comp, spec.flag, value },
+        spec.toast(comp, value)
+      )
+    end)
+  end)
+end
+
+--- Shared shape for the two-field Min -> Max setters (:M1SetDisplayRange and the
+--- :M1SetValidation MinMax branch): pick the component, prompt for a non-empty
+--- Min then a non-empty Max, then run `m1-project <verb> --component <comp>
+--- --min <min> --max <max>`. The nested cancel-on-empty cascade is identical
+--- between them; only the verb, prompt labels, and toast differ.
+---@param cfg NvimM1Config
+---@param component string  Already-resolved component path.
+---@param spec { verb: string, min_prompt: string, max_prompt: string, toast: fun(comp: string, min: string, max: string): string }
+local function minmax_setter(cfg, component, spec)
+  vim.ui.input({ prompt = spec.min_prompt }, function(min)
+    if not min or min == "" then
+      return
+    end
+    vim.ui.input({ prompt = spec.max_prompt }, function(max)
+      if not max or max == "" then
+        return
+      end
+      run(
+        cfg,
+        { spec.verb, "--component", component, "--min", min, "--max", max },
+        spec.toast(component, min, max)
+      )
+    end)
+  end)
+end
+
 --- :M1CreateChannel — prompt for name/type/unit/security, then create-channel.
 function M.create_channel(cfg)
   create_typed_component(cfg, {
@@ -329,18 +381,14 @@ end
 --- :M1SetUnit — prompt for component (unless given) + display unit (#46).
 ---@param component? string
 function M.set_unit(cfg, component)
-  with_component(component, function(comp)
-    vim.ui.input({ prompt = "Unit (e.g. rpm, kPa): " }, function(unit)
-      if not unit or unit == "" then
-        return
-      end
-      run(
-        cfg,
-        { "set-unit", "--component", comp, "--unit", unit },
-        comp .. " unit -> " .. unit
-      )
-    end)
-  end)
+  value_setter(cfg, component, {
+    prompt = "Unit (e.g. rpm, kPa): ",
+    verb = "set-unit",
+    flag = "--unit",
+    toast = function(comp, unit)
+      return comp .. " unit -> " .. unit
+    end,
+  })
 end
 
 --- Every component entry from `list-components --json` (path/classname/type/
@@ -675,18 +723,14 @@ end
 --- :M1SetQuantity — prompt for component (unless given) + physical quantity (#61).
 ---@param component? string
 function M.set_quantity(cfg, component)
-  with_component(component, function(comp)
-    vim.ui.input({ prompt = "Quantity (e.g. Angular Speed): " }, function(qty)
-      if not qty or qty == "" then
-        return
-      end
-      run(
-        cfg,
-        { "set-quantity", "--component", comp, "--quantity", qty },
-        comp .. " quantity -> " .. qty
-      )
-    end)
-  end)
+  value_setter(cfg, component, {
+    prompt = "Quantity (e.g. Angular Speed): ",
+    verb = "set-quantity",
+    flag = "--quantity",
+    toast = function(comp, qty)
+      return comp .. " quantity -> " .. qty
+    end,
+  })
 end
 
 --- :M1SetValidation — MinMax bounds or None; the in-editor remedy for T043 (#61).
@@ -705,21 +749,14 @@ function M.set_validation(cfg, component)
         )
         return
       end
-      vim.ui.input({ prompt = "Min: " }, function(min)
-        if not min or min == "" then
-          return
-        end
-        vim.ui.input({ prompt = "Max: " }, function(max)
-          if not max or max == "" then
-            return
-          end
-          run(
-            cfg,
-            { "set-validation", "--component", comp, "--min", min, "--max", max },
-            comp .. " validation -> [" .. min .. ", " .. max .. "]"
-          )
-        end)
-      end)
+      minmax_setter(cfg, comp, {
+        verb = "set-validation",
+        min_prompt = "Min: ",
+        max_prompt = "Max: ",
+        toast = function(c, min, max)
+          return c .. " validation -> [" .. min .. ", " .. max .. "]"
+        end,
+      })
     end)
   end)
 end
@@ -727,90 +764,67 @@ end
 --- :M1SetFormat — display format string (#61).
 ---@param component? string
 function M.set_format(cfg, component)
-  with_component(component, function(comp)
-    vim.ui.input({ prompt = "Format (e.g. %.1f): " }, function(fmt)
-      if not fmt or fmt == "" then
-        return
-      end
-      run(
-        cfg,
-        { "set-format", "--component", comp, "--format", fmt },
-        comp .. " format -> " .. fmt
-      )
-    end)
-  end)
+  value_setter(cfg, component, {
+    prompt = "Format (e.g. %.1f): ",
+    verb = "set-format",
+    flag = "--format",
+    toast = function(comp, fmt)
+      return comp .. " format -> " .. fmt
+    end,
+  })
 end
 
 --- :M1SetDps — display decimal places (#61).
 ---@param component? string
 function M.set_dps(cfg, component)
-  with_component(component, function(comp)
-    vim.ui.input({ prompt = "Decimal places: " }, function(dps)
-      if not dps or dps == "" then
-        return
-      end
-      run(
-        cfg,
-        { "set-dps", "--component", comp, "--dps", dps },
-        comp .. " dps -> " .. dps
-      )
-    end)
-  end)
+  value_setter(cfg, component, {
+    prompt = "Decimal places: ",
+    verb = "set-dps",
+    flag = "--dps",
+    toast = function(comp, dps)
+      return comp .. " dps -> " .. dps
+    end,
+  })
 end
 
 --- :M1SetDisplayRange — display min/max (#61).
 ---@param component? string
 function M.set_display_range(cfg, component)
   with_component(component, function(comp)
-    vim.ui.input({ prompt = "Display min: " }, function(min)
-      if not min or min == "" then
-        return
-      end
-      vim.ui.input({ prompt = "Display max: " }, function(max)
-        if not max or max == "" then
-          return
-        end
-        run(
-          cfg,
-          { "set-display-range", "--component", comp, "--min", min, "--max", max },
-          comp .. " display range -> [" .. min .. ", " .. max .. "]"
-        )
-      end)
-    end)
+    minmax_setter(cfg, comp, {
+      verb = "set-display-range",
+      min_prompt = "Display min: ",
+      max_prompt = "Display max: ",
+      toast = function(c, min, max)
+        return c .. " display range -> [" .. min .. ", " .. max .. "]"
+      end,
+    })
   end)
 end
 
 --- :M1AddTag / :M1RemoveTag — the in-editor remedy for the T092 tags audit (#61).
 ---@param component? string
 function M.add_tag(cfg, component)
-  with_component(component, function(comp)
-    vim.ui.input({ prompt = "Tag (e.g. System/Type tag name): " }, function(tag)
-      if not tag or tag == "" then
-        return
-      end
-      run(
-        cfg,
-        { "add-tag", "--component", comp, "--tag", tag },
-        comp .. " +tag " .. tag
-      )
-    end)
-  end)
+  value_setter(cfg, component, {
+    prompt = "Tag (e.g. System/Type tag name): ",
+    verb = "add-tag",
+    flag = "--tag",
+    toast = function(comp, tag)
+      return comp .. " +tag " .. tag
+    end,
+  })
 end
 
 ---@param component? string
 function M.remove_tag(cfg, component)
-  with_component(component, function(comp)
-    vim.ui.input({ prompt = "Tag to remove: " }, function(tag)
-      if not tag or tag == "" then
-        return
-      end
-      run(
-        cfg,
-        { "remove-tag", "--component", comp, "--tag", tag },
-        comp .. " -tag " .. tag
-      )
-    end)
-  end)
+  value_setter(cfg, component, {
+    prompt = "Tag to remove: ",
+    verb = "remove-tag",
+    flag = "--tag",
+    toast = function(comp, tag)
+      return comp .. " -tag " .. tag
+    end,
+  })
 end
 
 -- The matrix columns are the project's declared security groups (parity with
