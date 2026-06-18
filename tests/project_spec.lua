@@ -1394,3 +1394,186 @@ describe(
     end)
   end
 )
+
+-- The single-field setters (set_unit/set_quantity/set_format/set_dps/add_tag/
+-- remove_tag) were copy-paste variants of one shape: with_component -> a single
+-- vim.ui.input(non-empty guard) -> run({ verb, --component, comp, flag, value }).
+-- They now share one `value_setter` helper. That contract is: given the same
+-- component and value, each setter spawns `m1-project <verb> --component <comp>
+-- <flag> <value>` — identical apart from verb+flag — and the empty-input guard
+-- never spawns. These specs pin the shape against future drift; they intercept
+-- vim.system so they need no real binary.
+describe("nvim-m1.project single-field setters share one value_setter", function()
+  local project = require("nvim-m1.project")
+  local config = require("nvim-m1.config")
+
+  -- Drive `setter` with a fixed component + value, capturing the spawned command
+  -- (project flag stripped). Returns the captured vector, or nil if nothing was
+  -- spawned (the guard rejected the value).
+  local function capture(setter, value)
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local inputs = { value }
+    local orig_input, orig_system = vim.ui.input, vim.system
+    local captured
+    vim.ui.input = function(_, cb)
+      cb(table.remove(inputs, 1))
+    end
+    vim.system = function(cmd, _, on_exit)
+      captured = cmd
+      vim.schedule(function()
+        on_exit({ code = 0, stdout = "", stderr = "" })
+      end)
+      return { wait = function() end }
+    end
+    -- Pass the component explicitly so with_component skips its own prompt.
+    local okp = pcall(function()
+      setter(config.resolve(), "Root.X")
+    end)
+    vim.wait(2000, function()
+      return project.is_idle()
+    end)
+    vim.ui.input, vim.system = orig_input, orig_system
+    assert.is_true(okp)
+    if captured then
+      local out, i = {}, 1
+      while i <= #captured do
+        if captured[i] == "--project" then
+          i = i + 2
+        else
+          out[#out + 1] = captured[i]
+          i = i + 1
+        end
+      end
+      captured = out
+    end
+    return captured
+  end
+
+  it("each spawns `<verb> --component <comp> <flag> <value>`", function()
+    local cases = {
+      { setter = project.set_unit, verb = "set-unit", flag = "--unit" },
+      { setter = project.set_quantity, verb = "set-quantity", flag = "--quantity" },
+      { setter = project.set_format, verb = "set-format", flag = "--format" },
+      { setter = project.set_dps, verb = "set-dps", flag = "--dps" },
+      { setter = project.add_tag, verb = "add-tag", flag = "--tag" },
+      { setter = project.remove_tag, verb = "remove-tag", flag = "--tag" },
+    }
+    for _, c in ipairs(cases) do
+      local cmd = capture(c.setter, "VAL")
+      assert.is_table(cmd, c.verb .. " should spawn m1-project")
+      assert.equals(c.verb, cmd[2], c.verb .. " verb")
+      -- Everything after the binary+verb must be the canonical shape.
+      assert.same(
+        { "--component", "Root.X", c.flag, "VAL" },
+        { cmd[3], cmd[4], cmd[5], cmd[6] },
+        c.verb .. " arg shape"
+      )
+    end
+  end)
+
+  it("the non-empty guard skips the spawn for empty input", function()
+    assert.is_nil(capture(project.set_unit, ""), "empty value must not spawn")
+    assert.is_nil(capture(project.add_tag, ""), "empty tag must not spawn")
+  end)
+end)
+
+-- set_display_range and the set_validation MinMax branch both run the identical
+-- nested Min -> Max non-empty cascade, now factored onto one `minmax_setter`.
+-- Contract: same component + min + max -> `<verb> --component <comp> --min <min>
+-- --max <max>`, identical apart from the verb. A blank Min or Max never spawns.
+describe("nvim-m1.project min/max setters share one minmax_setter", function()
+  local project = require("nvim-m1.project")
+  local config = require("nvim-m1.config")
+
+  -- Drive a min/max setter, feeding the sequence of vim.ui.input answers (and a
+  -- single vim.ui.select for set_validation's "MinMax" choice). Returns the
+  -- captured spawn (project flag stripped), or nil if none.
+  local function capture(setter, inputs, selects)
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local prj = dir .. "/Project.m1prj"
+    vim.fn.writefile({
+      '<?xml version="1.0"?>',
+      "<Project>",
+      '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
+      "</Project>",
+    }, prj)
+    vim.cmd.edit(dir .. "/Main.m1scr")
+
+    local in_q = vim.deepcopy(inputs)
+    local sel_q = vim.deepcopy(selects or {})
+    local orig_input, orig_select, orig_system = vim.ui.input, vim.ui.select, vim.system
+    local captured
+    vim.ui.input = function(_, cb)
+      cb(table.remove(in_q, 1))
+    end
+    vim.ui.select = function(_, _, cb)
+      cb(table.remove(sel_q, 1))
+    end
+    vim.system = function(cmd, _, on_exit)
+      captured = cmd
+      vim.schedule(function()
+        on_exit({ code = 0, stdout = "", stderr = "" })
+      end)
+      return { wait = function() end }
+    end
+    local okp = pcall(function()
+      setter(config.resolve(), "Root.X")
+    end)
+    vim.wait(2000, function()
+      return project.is_idle()
+    end)
+    vim.ui.input, vim.ui.select, vim.system = orig_input, orig_select, orig_system
+    assert.is_true(okp)
+    if captured then
+      local out, i = {}, 1
+      while i <= #captured do
+        if captured[i] == "--project" then
+          i = i + 2
+        else
+          out[#out + 1] = captured[i]
+          i = i + 1
+        end
+      end
+      captured = out
+    end
+    return captured
+  end
+
+  it("set_display_range spawns set-display-range --min --max", function()
+    local cmd = capture(project.set_display_range, { "0", "200" })
+    assert.is_table(cmd)
+    assert.same(
+      { "set-display-range", "--component", "Root.X", "--min", "0", "--max", "200" },
+      { cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8] },
+      "display range arg shape"
+    )
+  end)
+
+  it("set_validation MinMax spawns set-validation --min --max", function()
+    local cmd = capture(project.set_validation, { "0", "10" }, { "MinMax" })
+    assert.is_table(cmd)
+    assert.same(
+      { "set-validation", "--component", "Root.X", "--min", "0", "--max", "10" },
+      { cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8] },
+      "validation arg shape"
+    )
+  end)
+
+  it("a blank Max aborts the cascade with no spawn", function()
+    assert.is_nil(
+      capture(project.set_display_range, { "0", "" }),
+      "blank Max must not spawn"
+    )
+  end)
+end)
