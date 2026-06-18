@@ -1577,3 +1577,112 @@ describe("nvim-m1.project min/max setters share one minmax_setter", function()
     )
   end)
 end)
+
+-- M.validate must consume m1-project's machine-readable `--json` report, not
+-- scrape its human-readable line prefixes. Scraping silently drops any finding
+-- whose phrasing/level/prefix changes (e.g. a future INFO/HINT level, or a
+-- re-worded summary), and buries the Root.* component path inside the message
+-- blob. Mirrors the JSON-decode contract of list-components / list-security.
+describe("nvim-m1.project.validate --json (maintainability)", function()
+  local project = require("nvim-m1.project")
+  local saved_system, saved_resolve, saved_project_file, saved_notify
+  local saved_setqflist, saved_copen
+  local last_argv, last_qf
+
+  before_each(function()
+    saved_system = vim.system
+    saved_resolve = project.resolve_cmd
+    saved_project_file = project.project_file
+    saved_notify = vim.notify
+    saved_setqflist = vim.fn.setqflist
+    saved_copen = vim.cmd.copen
+    last_argv, last_qf = nil, nil
+    project.resolve_cmd = function()
+      return "/fake/m1-project"
+    end
+    project.project_file = function()
+      return "/tmp/Some/Project.m1prj"
+    end
+    vim.notify = function() end
+    vim.cmd.copen = function() end
+    vim.fn.setqflist = function(_, _, what)
+      last_qf = what
+    end
+  end)
+  after_each(function()
+    vim.system = saved_system
+    project.resolve_cmd = saved_resolve
+    project.project_file = saved_project_file
+    vim.notify = saved_notify
+    vim.fn.setqflist = saved_setqflist
+    vim.cmd.copen = saved_copen
+  end)
+
+  local function stub_json(stdout, code)
+    vim.system = function(argv)
+      last_argv = argv
+      return {
+        wait = function()
+          return { code = code or 0, stdout = stdout, stderr = "" }
+        end,
+      }
+    end
+  end
+
+  it("spawns validate with --json", function()
+    stub_json("[]", 0)
+    project.validate(require("nvim-m1.config").resolve())
+    assert.is_table(last_argv)
+    local has_json = false
+    for _, a in ipairs(last_argv) do
+      if a == "--json" then
+        has_json = true
+      end
+    end
+    assert.is_true(has_json, "validate must request --json: " .. vim.inspect(last_argv))
+  end)
+
+  it(
+    "decodes findings into typed quickfix items carrying the component path",
+    function()
+      stub_json(
+        "[\n"
+          .. '  {"level":"error","path":"Root.Engine.Map","message":"duplicate sibling name"},\n'
+          .. '  {"level":"warning","path":"Root.Brakes","message":"component missing from view"}\n'
+          .. "]",
+        1
+      )
+      project.validate(require("nvim-m1.config").resolve())
+      assert.is_table(last_qf)
+      local items = last_qf.items
+      assert.equals(
+        2,
+        #items,
+        "both findings must surface, not fall through to summary"
+      )
+
+      assert.equals("E", items[1].type)
+      assert.equals("W", items[2].type)
+      -- The Root.* path must be visible in the entry, not buried/dropped.
+      assert.is_truthy(
+        items[1].text:find("Root.Engine.Map", 1, true),
+        "error item must carry the component path: " .. items[1].text
+      )
+      assert.is_truthy(
+        items[2].text:find("Root.Brakes", 1, true),
+        "warning item must carry the component path: " .. items[2].text
+      )
+    end
+  )
+
+  it("surfaces an unknown future level instead of dropping it", function()
+    stub_json('[{"level":"hint","path":"Root.X","message":"a future level"}]', 0)
+    project.validate(require("nvim-m1.config").resolve())
+    assert.is_table(last_qf)
+    assert.equals(
+      1,
+      #last_qf.items,
+      "an unknown level (INFO/HINT) must still appear, not vanish"
+    )
+  end)
+end)

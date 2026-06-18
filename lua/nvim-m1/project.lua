@@ -585,8 +585,22 @@ function M.rename_component(cfg, component)
   end)
 end
 
---- :M1ValidateProject — run `m1-project validate` and load the findings into
---- the quickfix list (ERROR -> E, WARN -> W); opens it when non-empty (#51).
+--- Map a validate finding's `level` field to a quickfix `type`. Case-insensitive
+--- (the CLI emits lowercase "error"/"warning"); unknown future levels (e.g.
+--- INFO/HINT) fall through to "I" so they still surface rather than vanishing.
+local function finding_type(level)
+  local l = type(level) == "string" and level:lower() or ""
+  if l == "error" then
+    return "E"
+  elseif l == "warning" or l == "warn" then
+    return "W"
+  end
+  return "I"
+end
+
+--- :M1ValidateProject — run `m1-project validate --json` and load the findings
+--- into the quickfix list (error -> E, warning -> W, unknown -> I); opens it
+--- when non-empty (#51).
 function M.validate(cfg)
   local bin = M.resolve_cmd(cfg)
   local prj = M.project_file()
@@ -601,9 +615,14 @@ function M.validate(cfg)
   -- :wait(timeout) pumps the loop instead of hard-blocking, and degrades a hung
   -- subprocess to a clean error rather than freezing the editor's UI thread
   -- indefinitely (#68, #91 — this call site was missed by #68). validate exits 1
-  -- on error-level findings; the report is still on stdout.
+  -- on error-level findings; the report is still on stdout. --json gives a
+  -- structured array so we don't couple to the CLI's human phrasing (a re-worded
+  -- finding, a new INFO/HINT level, or a changed summary line would otherwise
+  -- silently fall through the old line-prefix scrape and vanish).
   local ran, res = pcall(function()
-    return vim.system({ bin, "validate", "--project", prj }, { text = true }):wait(5000)
+    return vim
+      .system({ bin, "validate", "--project", prj, "--json" }, { text = true })
+      :wait(5000)
   end)
   if not ran then
     vim.notify("nvim-m1: validate timed out or failed to run", vim.log.levels.ERROR)
@@ -614,26 +633,31 @@ function M.validate(cfg)
     vim.notify("nvim-m1: validate failed: " .. (res.stderr or ""), vim.log.levels.ERROR)
     return
   end
+  -- Decode the structured report, mirroring component_entries' pcall + type
+  -- guard. A decode failure degrades to "no findings" rather than erroring.
   local items = {}
-  local summary = "done"
-  for _, line in ipairs(vim.split(out, "\n", { trimempty = true })) do
-    local level, rest = line:match("^(ERROR) (.+)$")
-    if not level then
-      level, rest = line:match("^(WARN) (.+)$")
-    end
-    if level then
-      table.insert(items, {
-        filename = prj,
-        lnum = 1,
-        col = 1,
-        type = level == "ERROR" and "E" or "W",
-        text = rest,
-      })
-    else
-      summary = line
+  local ok, decoded = pcall(vim.json.decode, out)
+  if ok and type(decoded) == "table" then
+    for _, f in ipairs(decoded) do
+      if type(f) == "table" then
+        -- The finding's path is a Root.* component path, not a file:line, so
+        -- filename=prj + lnum/col=1 stays accurate; surface the path in the
+        -- entry text rather than burying it inside the message.
+        local path = type(f.path) == "string" and f.path or ""
+        local message = type(f.message) == "string" and f.message or ""
+        local text = path ~= "" and (path .. ": " .. message) or message
+        table.insert(items, {
+          filename = prj,
+          lnum = 1,
+          col = 1,
+          type = finding_type(f.level),
+          text = text,
+        })
+      end
     end
   end
   vim.fn.setqflist({}, " ", { title = "m1-project validate", items = items })
+  local summary = #items == 0 and "no findings" or (#items .. " finding(s)")
   if #items > 0 then
     vim.cmd.copen()
     vim.notify("nvim-m1: project validation: " .. summary, vim.log.levels.WARN)
