@@ -22,7 +22,7 @@ jobs:
     name: Lua Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: JohnnyMorganz/stylua-action@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -37,7 +37,7 @@ jobs:
       matrix:
         neovim: [stable, nightly]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: rhysd/action-setup-vim@v1
         with:
@@ -45,7 +45,7 @@ jobs:
           version: ${{ matrix.neovim }}
 
       - name: Check out plenary.nvim
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: nvim-lua/plenary.nvim
           path: deps/plenary.nvim
@@ -55,7 +55,7 @@ jobs:
       # regression where the parser was never built. ubuntu-latest already ships
       # a C compiler (cc/gcc), which the spec needs.
       - name: Check out tree-sitter-m1
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: C-Nucifora/tree-sitter-m1
           path: deps/tree-sitter-m1
