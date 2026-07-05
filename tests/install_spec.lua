@@ -329,6 +329,218 @@ describe("nvim-m1.install", function()
     it("stale_tools() ignores tools that are not bundled on disk", function()
       assert.same({}, install.stale_tools())
     end)
+
+    it(
+      "stale_tools() flags a corrupt (0-byte) bundled binary the manifest calls fresh",
+      function()
+        -- A truncated download can leave a 0-byte +x file whose manifest entry
+        -- matches the pin. The version-string check alone reports it "fresh"; the
+        -- self-heal must instead notice it can't run and re-fetch it.
+        vim.fn.mkdir(install.bin_dir(), "p")
+        local p = install.tool_path("m1-lint")
+        assert(io.open(p, "w")):close() -- 0 bytes
+        vim.fn.system({ "chmod", "+x", p })
+        write_manifest({ ["m1-lint"] = install.versions["m1-lint"] })
+        assert.is_true(
+          vim.tbl_contains(install.stale_tools(), "m1-lint"),
+          "a zero-byte binary must be stale even when the manifest version matches"
+        )
+      end
+    )
+
+    it("stale_tools() flags a bundled binary that lost its +x bit", function()
+      fake_binary("m1-lint")
+      vim.fn.system({ "chmod", "-x", install.tool_path("m1-lint") })
+      write_manifest({ ["m1-lint"] = install.versions["m1-lint"] })
+      assert.is_true(
+        vim.tbl_contains(install.stale_tools(), "m1-lint"),
+        "a non-executable bundled binary must be treated as stale"
+      )
+    end)
+  end)
+
+  describe("fetch_async is atomic (never corrupts the live binary)", function()
+    -- The download must land in a sidecar and only swap into the live path once
+    -- verified + non-empty, so a failed download / attestation mismatch / empty
+    -- artifact can never corrupt or delete the working binary, and replacing a
+    -- running server can't hit ETXTBSY (os.rename swaps the inode).
+    local saved_system, saved_exepath, saved_notify, saved_resign
+
+    before_each(function()
+      saved_system = vim.system
+      saved_exepath = vim.fn.exepath
+      saved_notify = vim.notify
+      saved_resign = install.needs_resign
+      install.needs_resign = function()
+        return false
+      end
+      vim.notify = function() end
+      vim.fn.delete(install.bin_dir(), "rf")
+      vim.fn.mkdir(install.bin_dir(), "p")
+    end)
+    after_each(function()
+      vim.system = saved_system
+      vim.fn.exepath = saved_exepath
+      vim.notify = saved_notify
+      install.needs_resign = saved_resign
+      vim.fn.delete(install.bin_dir(), "rf")
+    end)
+
+    -- Seed a healthy "live" binary at the tool's bundled path.
+    local function seed_live(tool, content)
+      local p = install.tool_path(tool)
+      local f = assert(io.open(p, "w"))
+      f:write(content)
+      f:close()
+      return p
+    end
+
+    local function read(p)
+      local f = io.open(p, "r")
+      if not f then
+        return nil
+      end
+      local c = f:read("*a")
+      f:close()
+      return c
+    end
+
+    it("a failed download leaves the existing binary untouched", function()
+      local dest = seed_live("m1-lint", "GOOD-BINARY")
+      vim.fn.exepath = function(n)
+        return n == "curl" and "/usr/bin/curl" or ""
+      end
+      -- curl exits non-zero (e.g. a 404) having written nothing usable.
+      vim.system = function(_, _, on_exit)
+        vim.defer_fn(function()
+          on_exit({ code = 22, stdout = "", stderr = "curl: (22) 404" })
+        end, 5)
+      end
+      local done
+      install.fetch_async("m1-lint", function(ok)
+        done = ok
+      end)
+      vim.wait(1000, function()
+        return done ~= nil
+      end, 5)
+      assert.is_false(done)
+      assert.equals(
+        "GOOD-BINARY",
+        read(dest),
+        "the live binary must survive a failed download"
+      )
+      assert.is_nil(read(dest .. ".part"), "no .part sidecar may be left behind")
+    end)
+
+    it(
+      "an attestation failure removes the sidecar but keeps the live binary",
+      function()
+        local dest = seed_live("m1-lint", "GOOD-BINARY")
+        vim.fn.exepath = function(n)
+          if n == "curl" then
+            return "/usr/bin/curl"
+          end
+          if n == "gh" then
+            return "/usr/bin/gh"
+          end
+          return ""
+        end
+        vim.system = function(cmd, _, on_exit)
+          if cmd[1] == "/usr/bin/curl" then
+            for i, a in ipairs(cmd) do
+              if a == "-o" then
+                local f = assert(io.open(cmd[i + 1], "w"))
+                f:write("TAMPERED")
+                f:close()
+              end
+            end
+            return vim.defer_fn(function()
+              on_exit({ code = 0, stdout = "", stderr = "" })
+            end, 5)
+          end
+          -- gh attestation verify: a genuine mismatch (not 404 / not auth).
+          return vim.defer_fn(function()
+            on_exit({
+              code = 1,
+              stdout = "",
+              stderr = "verification failed: signature does not match",
+            })
+          end, 5)
+        end
+        local done, err
+        install.fetch_async("m1-lint", function(ok, e)
+          done, err = ok, e
+        end)
+        vim.wait(1000, function()
+          return done ~= nil
+        end, 5)
+        assert.is_false(done)
+        assert.is_truthy(err and err:find("FAILED", 1, true))
+        assert.equals(
+          "GOOD-BINARY",
+          read(dest),
+          "attestation failure must not delete the live binary"
+        )
+        assert.is_nil(read(dest .. ".part"), "the rejected download must be cleaned up")
+      end
+    )
+
+    it("a 0-byte download is refused and the live binary is kept", function()
+      local dest = seed_live("m1-lint", "GOOD-BINARY")
+      vim.fn.exepath = function(n)
+        return n == "curl" and "/usr/bin/curl" or "" -- no gh: warn + proceed
+      end
+      vim.system = function(cmd, _, on_exit)
+        for i, a in ipairs(cmd) do
+          if a == "-o" then
+            assert(io.open(cmd[i + 1], "w")):close() -- empty file
+          end
+        end
+        vim.defer_fn(function()
+          on_exit({ code = 0, stdout = "", stderr = "" })
+        end, 5)
+      end
+      local done, err
+      install.fetch_async("m1-lint", function(ok, e)
+        done, err = ok, e
+      end)
+      vim.wait(1000, function()
+        return done ~= nil
+      end, 5)
+      assert.is_false(done)
+      assert.is_truthy(err and err:find("empty", 1, true))
+      assert.equals("GOOD-BINARY", read(dest))
+      assert.is_nil(read(dest .. ".part"))
+    end)
+
+    it("a verified download atomically replaces the live binary", function()
+      local dest = seed_live("m1-lint", "OLD")
+      vim.fn.exepath = function(n)
+        return n == "curl" and "/usr/bin/curl" or "" -- no gh: warn + proceed
+      end
+      vim.system = function(cmd, _, on_exit)
+        for i, a in ipairs(cmd) do
+          if a == "-o" then
+            local f = assert(io.open(cmd[i + 1], "w"))
+            f:write("NEW-VERIFIED")
+            f:close()
+          end
+        end
+        vim.defer_fn(function()
+          on_exit({ code = 0, stdout = "", stderr = "" })
+        end, 5)
+      end
+      local done
+      install.fetch_async("m1-lint", function(ok)
+        done = ok
+      end)
+      vim.wait(1000, function()
+        return done ~= nil
+      end, 5)
+      assert.is_true(done)
+      assert.equals("NEW-VERIFIED", read(dest), "the new binary must be swapped in")
+      assert.is_nil(read(dest .. ".part"), "the sidecar must be gone after the swap")
+    end)
   end)
 
   describe("install_async in-flight guard (single concurrent run)", function()

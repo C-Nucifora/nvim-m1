@@ -73,6 +73,14 @@ function M.setup(cfg)
         return
       end
       local buf = ev.buf
+      -- Re-attaching (e.g. :M1RestartServer, or any LSP detach/attach cycle)
+      -- fires LspAttach again for the same buffer. The per-buffer refresh
+      -- autocmds below are buffer-local additions to this group, so without
+      -- clearing they stack a fresh copy on every re-attach — refreshing the
+      -- same lenses N times and never getting cleaned up. Drop this buffer's
+      -- existing ones first. (The group's global LspAttach handler is not
+      -- buffer-local, so it is untouched.) (mirrors lint.lua's gate-on-re-setup.)
+      vim.api.nvim_clear_autocmds({ group = group, buffer = buf })
       M._refresh_buf(buf)
       -- Keep lenses current as the buffer is edited/navigated.
       vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "InsertLeave" }, {
