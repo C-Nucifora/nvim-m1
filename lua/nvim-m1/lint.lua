@@ -111,10 +111,29 @@ end
 --- The nvim-lint linter definition for m1-lint (bundled binary when not on $PATH).
 function M.linter()
   return {
-    cmd = require("nvim-m1.install").resolve("m1-lint") or "m1-lint",
-    stdin = false,
-    args = { "--format", "json" },
-    append_fname = true,
+    -- Resolve the binary per run, not once at setup(): a later `:M1Install`
+    -- that makes m1-lint resolvable must take effect without a re-setup — a
+    -- setup-time snapshot would pin the fallback name forever. (mirrors
+    -- format.lua's conform `command` function.)
+    cmd = function()
+      return require("nvim-m1.install").resolve("m1-lint") or "m1-lint"
+    end,
+    -- Lint the buffer's LIVE contents over stdin, not the file on disk: on
+    -- lint-on-InsertLeave (and any unsaved edit) the on-disk file is stale, so
+    -- reading it produced misaligned / phantom diagnostics. m1-lint keys its
+    -- JSON report by `--stdin-filename`, so M.parse's path selection still
+    -- works. (mirrors format.lua feeding m1-fmt over stdin.)
+    stdin = true,
+    args = {
+      "--format",
+      "json",
+      "--stdin-filename",
+      function()
+        return vim.api.nvim_buf_get_name(0)
+      end,
+      "-",
+    },
+    append_fname = false,
     stream = "stdout",
     ignore_exitcode = true, -- exit 1 means "found lint", not "crashed"
     parser = function(output, bufnr)
@@ -124,25 +143,39 @@ function M.linter()
   }
 end
 
---- Built-in fallback runner (used when nvim-lint is absent): run m1-lint on the
---- buffer's file and publish diagnostics into our namespace.
+--- Built-in fallback runner (used when nvim-lint is absent): lint the buffer's
+--- LIVE contents over stdin — not the file on disk, which is stale on any
+--- unsaved edit (e.g. lint-on-InsertLeave) and yielded misaligned / phantom
+--- diagnostics. m1-lint keys its JSON report by `--stdin-filename`, so
+--- M.parse's path selection still works; an unnamed buffer lints anonymously.
+--- Publishes into our namespace. (mirrors format.lua's stdin pattern.)
 ---@param bufnr integer
 function M.run_builtin(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local path = vim.api.nvim_buf_get_name(bufnr)
   local cmd = require("nvim-m1.install").resolve("m1-lint")
-  if path == "" or not cmd then
+  if not cmd then
     return
   end
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  local source = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+    .. "\n"
+  local args = { cmd, "--format", "json" }
+  if path ~= "" then
+    table.insert(args, "--stdin-filename")
+    table.insert(args, path)
+  end
+  table.insert(args, "-")
   vim.system(
-    { cmd, "--format", "json", path },
-    { text = true },
+    args,
+    { text = true, stdin = source },
     vim.schedule_wrap(function(res)
       if not vim.api.nvim_buf_is_valid(bufnr) then
         return
       end
-      local items =
-        M.parse((res.stdout or "") ~= "" and res.stdout or res.stderr or "", path)
+      local items = M.parse(
+        (res.stdout or "") ~= "" and res.stdout or res.stderr or "",
+        path ~= "" and path or nil
+      )
       vim.diagnostic.set(NS, bufnr, items)
     end)
   )

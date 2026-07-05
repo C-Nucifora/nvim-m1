@@ -117,6 +117,91 @@ describe("nvim-m1.lint.parse", function()
   end)
 end)
 
+describe("nvim-m1.lint.linter definition (stdin + late-bound cmd)", function()
+  local install = require("nvim-m1.install")
+  local saved_resolve
+
+  before_each(function()
+    saved_resolve = install.resolve
+  end)
+  after_each(function()
+    install.resolve = saved_resolve
+  end)
+
+  it("resolves the binary per run, not once at definition time", function()
+    -- cmd must be a function so a later :M1Install that makes m1-lint resolvable
+    -- takes effect without a re-setup (a snapshot would pin the fallback name).
+    local def = lint.linter()
+    assert.equals("function", type(def.cmd))
+    install.resolve = function()
+      return nil
+    end
+    assert.equals("m1-lint", def.cmd(), "falls back to the bare name when unresolved")
+    install.resolve = function()
+      return "/late/installed/m1-lint"
+    end
+    assert.equals(
+      "/late/installed/m1-lint",
+      def.cmd(),
+      "a later install is picked up per run"
+    )
+  end)
+
+  it("lints buffer contents over stdin, keyed by --stdin-filename", function()
+    local def = lint.linter()
+    assert.is_true(def.stdin, "must feed the buffer over stdin, not read the disk file")
+    assert.is_false(
+      def.append_fname,
+      "the on-disk path must not be appended as a file arg"
+    )
+    local joined = table.concat(vim.tbl_map(tostring, def.args), " ")
+    assert.is_truthy(joined:find("--stdin-filename", 1, true))
+    assert.equals("-", def.args[#def.args], "a lone - makes m1-lint read stdin")
+  end)
+end)
+
+describe("nvim-m1.lint.run_builtin lints live buffer contents (#stdin)", function()
+  local install = require("nvim-m1.install")
+  local saved_system, saved_resolve
+  local buf
+
+  before_each(function()
+    saved_system = vim.system
+    saved_resolve = install.resolve
+    install.resolve = function()
+      return "/fake/m1-lint"
+    end
+    buf = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_name(buf, "/tmp/unsaved.m1scr")
+    -- Unsaved edits: what's in the buffer differs from any on-disk file.
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "floating A = 1", "when A" })
+  end)
+  after_each(function()
+    vim.system = saved_system
+    install.resolve = saved_resolve
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  it("passes buffer text on stdin and does not read the file path as an arg", function()
+    local captured
+    vim.system = function(cmd, opts)
+      captured = { cmd = cmd, opts = opts }
+      return { wait = function() end }
+    end
+    lint.run_builtin(buf)
+    assert.is_truthy(captured, "run_builtin must invoke m1-lint")
+    -- The live buffer text is piped, so an unsaved buffer lints correctly.
+    assert.equals("floating A = 1\nwhen A\n", captured.opts.stdin)
+    -- The command reads stdin (trailing `-`) with the buffer name for reporting,
+    -- and never passes the path as a positional file to read from disk.
+    assert.equals("-", captured.cmd[#captured.cmd])
+    local joined = table.concat(captured.cmd, " ")
+    assert.is_truthy(joined:find("--stdin-filename /tmp/unsaved.m1scr", 1, true))
+  end)
+end)
+
 describe("nvim-m1.lint.lsp_attached (defer to the server, #25)", function()
   local client_name = require("nvim-m1.lsp").client_name
   local saved_get_clients

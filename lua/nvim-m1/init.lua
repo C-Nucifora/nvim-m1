@@ -31,6 +31,15 @@ M.config = nil
 ---@type table<string, string>
 M._proj_cmds = {}
 
+--- The non-project `:M1*` commands (format/lint/config/toolchain/server), mapped
+--- to the `desc` they were registered with — the tool-side companion to
+--- `M._proj_cmds`. Together these two tables are the single source of command
+--- descriptions that `nvim-m1.whichkey` derives its menu labels from, so a
+--- command's label lives in exactly one place and the which-key registration
+--- can't drift out of sync with the real command set. (audit #3)
+---@type table<string, string>
+M._tool_cmds = {}
+
 --- Register the m1scr/m1prj filetypes. Safe to call repeatedly and before
 --- setup() (the ftdetect/ and plugin/ shims call it so `ft = "m1scr"` lazy
 --- triggers fire).
@@ -154,26 +163,39 @@ end
 
 --- Convenience user commands and keymaps.
 local function user_commands()
-  vim.api.nvim_create_user_command("M1Format", function()
-    format.format(0, M.config or config.defaults)
-  end, { desc = "nvim-m1: format the current buffer" })
+  -- Register a non-project command AND record its desc in M._tool_cmds, so the
+  -- which-key menu derives its label from here instead of a hand-maintained
+  -- copy that drifts out of sync with the real command set. (audit #3)
+  local function tool_cmd(name, desc, fn, opts)
+    local full = "nvim-m1: " .. desc
+    M._tool_cmds[name] = full
+    opts = opts or {}
+    opts.desc = full
+    vim.api.nvim_create_user_command(name, fn, opts)
+  end
 
-  vim.api.nvim_create_user_command("M1FormatToggle", function()
+  tool_cmd("M1Format", "format the current buffer", function()
+    format.format(0, M.config or config.defaults)
+  end)
+
+  tool_cmd("M1FormatToggle", "toggle format-on-save", function()
     vim.g.nvim_m1_format_on_save = not vim.g.nvim_m1_format_on_save
     vim.notify(
       "M1 format-on-save: " .. (vim.g.nvim_m1_format_on_save and "ON" or "OFF")
     )
-  end, { desc = "nvim-m1: toggle format-on-save" })
+  end)
 
-  vim.api.nvim_create_user_command("M1Lint", function()
+  tool_cmd("M1Lint", "lint the current buffer", function()
     lint.lint(0)
-  end, { desc = "nvim-m1: lint the current buffer" })
+  end)
 
-  vim.api.nvim_create_user_command("M1GenerateConfig", function()
-    generate_config(M.config or config.defaults)
-  end, {
-    desc = "nvim-m1: write a default m1-tools.toml to the project root",
-  })
+  tool_cmd(
+    "M1GenerateConfig",
+    "write a default m1-tools.toml to the project root",
+    function()
+      generate_config(M.config or config.defaults)
+    end
+  )
 
   -- Register a project command that always passes the resolved config, falling
   -- back to config.defaults when invoked before setup() (M.config is nil until
@@ -256,21 +278,21 @@ local function user_commands()
   proj_cmd("M1CreateConstant", "create_constant", "create a constant in Project.m1prj")
   proj_cmd("M1CreateTable", "create_table", "create a 1-3 axis table in Project.m1prj")
 
-  vim.api.nvim_create_user_command(
+  tool_cmd(
     "M1Install",
+    "download the bundled M1 toolchain (m1-lsp/fmt/lint/project)",
     function()
       M._install_tools_async()
-    end,
-    { desc = "nvim-m1: download the bundled M1 toolchain (m1-lsp/fmt/lint/project)" }
+    end
   )
 
   -- :M1Update is an alias — install always fetches the pinned versions.
-  vim.api.nvim_create_user_command(
+  tool_cmd(
     "M1Update",
+    "re-download the bundled M1 toolchain at the pinned versions",
     function()
       M._install_tools_async()
-    end,
-    { desc = "nvim-m1: re-download the bundled M1 toolchain at the pinned versions" }
+    end
   )
 
   -- Parity with m1-vscode's `m1.restartServer`. A live m1-lsp keeps running
@@ -278,17 +300,21 @@ local function user_commands()
   -- stop+re-attach to cycle the process — and on the native (0.11+) LSP path
   -- this plugin prefers, nvim-lspconfig's :LspRestart isn't available. This
   -- command works on every supported Neovim.
-  vim.api.nvim_create_user_command("M1RestartServer", function()
-    local ok, reason = lsp.restart(M.config or config.defaults)
-    if ok then
-      vim.notify("nvim-m1: m1-lsp restarted")
-    else
-      vim.notify(
-        "nvim-m1: could not restart m1-lsp: " .. (reason or "unknown"),
-        vim.log.levels.ERROR
-      )
+  tool_cmd(
+    "M1RestartServer",
+    "restart the m1-lsp server (use after :M1Update)",
+    function()
+      local ok, reason = lsp.restart(M.config or config.defaults)
+      if ok then
+        vim.notify("nvim-m1: m1-lsp restarted")
+      else
+        vim.notify(
+          "nvim-m1: could not restart m1-lsp: " .. (reason or "unknown"),
+          vim.log.levels.ERROR
+        )
+      end
     end
-  end, { desc = "nvim-m1: restart the m1-lsp server (use after :M1Update)" })
+  )
 end
 
 --- Download the given tools (default: all) WITHOUT blocking the editor, then

@@ -301,15 +301,31 @@ function M.fetch_async(tool, cb)
     asset
   )
   local dest = M.bin_dir() .. "/" .. tool .. suffix
+  -- Download to a sidecar path and only swap it into `dest` once it is fully
+  -- verified, executable and non-empty, so the LIVE binary is never at risk:
+  --   * a failed / truncated download can't corrupt or shrink it,
+  --   * a build-provenance failure removes the sidecar, never os.remove()s the
+  --     working binary out from under the running LSP,
+  --   * replacing a live server can't hit ETXTBSY — os.rename() swaps the inode
+  --     (the old one stays mapped for the running process) instead of
+  --     truncating the file curl was told to write in place.
+  -- The rename is atomic because the sidecar shares dest's directory (same fs).
+  local part = dest .. ".part"
+
+  --- Abort this fetch: drop the half-finished sidecar (never the live binary)
+  --- and report the error. Always leaves `dest` exactly as it was.
+  local function fail(msg)
+    os.remove(part)
+    return cb(false, msg)
+  end
 
   vim.system(
-    { curl, "-fSL", "--retry", "2", "-o", dest, url },
+    { curl, "-fSL", "--retry", "2", "-o", part, url },
     { text = true },
     function(res)
       if res.code ~= 0 then
         return vim.schedule(function()
-          cb(
-            false,
+          fail(
             ("failed to download %s %s\n  %s\n  %s"):format(
               tool,
               version,
@@ -320,20 +336,33 @@ function M.fetch_async(tool, cb)
         end)
       end
       vim.schedule(function()
-        -- Verify build provenance BEFORE making the artifact executable or
-        -- running it, so a tampered/substituted asset is rejected at rest (it
-        -- never gets +x). (#21)
-        M.attest_verify_async(dest, repo, function(vok, verr)
+        -- Verify build provenance on the sidecar BEFORE making it executable or
+        -- running it, so a tampered/substituted asset is rejected at rest and
+        -- never reaches the live path. (#21)
+        M.attest_verify_async(part, repo, function(vok, verr)
           if not vok then
-            os.remove(dest)
-            return cb(false, verr)
+            return fail(verr)
           end
           if suffix == "" then
-            vim.uv.fs_chmod(dest, 493) -- 0755: the verified artifact may now run
+            vim.uv.fs_chmod(part, 493) -- 0755: the verified artifact may now run
           end
-          local rok, rerr = resign(dest)
+          local rok, rerr = resign(part)
           if not rok then
-            return cb(false, rerr)
+            return fail(rerr)
+          end
+          -- Guard against a 0-byte / unreadable artifact silently replacing a
+          -- good binary (curl can exit 0 having written nothing on some errors).
+          local st = vim.uv.fs_stat(part)
+          if not st or st.size == 0 then
+            return fail(("downloaded %s is empty — refusing to install"):format(tool))
+          end
+          -- Atomic swap into place: only now does the live binary change, and
+          -- only to the fully-verified artifact.
+          local moved, rename_err = os.rename(part, dest)
+          if not moved then
+            return fail(
+              ("failed to install %s into place: %s"):format(tool, tostring(rename_err))
+            )
           end
           cb(true)
         end)
@@ -379,19 +408,34 @@ local function write_manifest(versions)
   f:close()
 end
 
---- Default tools whose on-disk bundled binary does not match the pinned version
---- (or that carry no manifest entry). Tools resolved from `$PATH`/an override, or
---- simply not bundled on disk, are not "stale" — only the bundle is considered.
---- (#26)
+--- A bundled tool binary that is present on disk but unusable — a truncated /
+--- 0-byte download, or one that lost its executable bit. Such a binary passes
+--- the manifest-version check ("fresh") yet cannot actually run, so before the
+--- atomic-download fix the self-heal never noticed the broken state. Treat it as
+--- stale so it is re-fetched. A binary that is simply absent is NOT "broken"
+--- here (it's just not bundled). (#26)
+---@param tool string
+---@return boolean
+local function bundled_broken(tool)
+  local path = M.tool_path(tool)
+  local st = vim.uv.fs_stat(path)
+  if not st then
+    return false -- not bundled at all
+  end
+  return st.size == 0 or vim.fn.executable(path) ~= 1
+end
+
+--- Default tools whose on-disk bundled binary needs refreshing: it does not
+--- match the pinned version (or carries no manifest entry), OR it is present but
+--- corrupt/non-executable. Tools resolved from `$PATH`/an override, or simply
+--- not bundled on disk, are not "stale" — only the bundle is considered. (#26)
 ---@return string[]
 function M.stale_tools()
   local installed = M.installed_versions()
   local stale = {}
   for _, tool in ipairs(M.tools) do
-    if
-      vim.fn.executable(M.tool_path(tool)) == 1
-      and installed[tool] ~= M.versions[tool]
-    then
+    local present = vim.uv.fs_stat(M.tool_path(tool)) ~= nil
+    if present and (bundled_broken(tool) or installed[tool] ~= M.versions[tool]) then
       table.insert(stale, tool)
     end
   end

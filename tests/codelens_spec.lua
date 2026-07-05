@@ -33,6 +33,57 @@ describe("nvim-m1.codelens", function()
   end)
 end)
 
+describe("nvim-m1.codelens no duplicate autocmds on LSP re-attach", function()
+  -- Re-attaching (e.g. :M1RestartServer, or an LSP detach/attach cycle) fires
+  -- LspAttach again for the same buffer. Without clearing, each re-attach used
+  -- to stack another copy of the per-buffer refresh autocmds in the group.
+  local saved_get_client
+  local buf
+
+  before_each(function()
+    saved_get_client = vim.lsp.get_client_by_id
+    vim.lsp.get_client_by_id = function()
+      return {
+        name = require("nvim-m1.lsp").client_name,
+        server_capabilities = { codeLensProvider = {} },
+      }
+    end
+    buf = vim.api.nvim_create_buf(false, false)
+  end)
+  after_each(function()
+    vim.lsp.get_client_by_id = saved_get_client
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  local function buf_autocmds()
+    return vim.api.nvim_get_autocmds({ group = "NvimM1CodeLens", buffer = buf })
+  end
+
+  it("re-attaching does not stack the per-buffer refresh autocmds", function()
+    codelens.setup({ codelens = true })
+    vim.api.nvim_exec_autocmds(
+      "LspAttach",
+      { buffer = buf, data = { client_id = 1 }, modeline = false }
+    )
+    local first = #buf_autocmds()
+    assert.is_true(
+      first >= 1,
+      "the per-buffer refresh autocmds must be wired on attach"
+    )
+    vim.api.nvim_exec_autocmds(
+      "LspAttach",
+      { buffer = buf, data = { client_id = 1 }, modeline = false }
+    )
+    assert.equals(
+      first,
+      #buf_autocmds(),
+      "a second attach must not duplicate the buffer-local autocmds"
+    )
+  end)
+end)
+
 describe("nvim-m1.codelens refresh shim (#66)", function()
   local codelens = require("nvim-m1.codelens")
 
