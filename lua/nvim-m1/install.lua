@@ -29,10 +29,10 @@ local M = {}
 --- an nvim-m1 release) to upgrade the bundled toolchain — the Neovim analogue of
 --- m1-vscode's `package.json` `serverVersion` pin.
 M.versions = {
-  ["m1-lsp"] = "v0.46.0",
+  ["m1-lsp"] = "v0.47.0",
   ["m1-fmt"] = "v0.17.0",
   ["m1-lint"] = "v0.24.0",
-  ["m1-project"] = "v0.12.0",
+  ["m1-project"] = "v0.12.1",
 }
 
 --- The GitHub repo each tool's release binaries come from.
