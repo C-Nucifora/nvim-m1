@@ -416,10 +416,12 @@ describe("nvim-m1.project", function()
     local prj = dir .. "/Project.m1prj"
     vim.fn.writefile({
       '<?xml version="1.0"?>',
-      "<Project>",
+      "<MoTeCM1BuildSession>",
+      "  <Project>",
       '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
       '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
-      "</Project>",
+      "  </Project>",
+      "</MoTeCM1BuildSession>",
     }, prj)
     -- A buffer inside the project so project_file() finds it.
     vim.cmd.edit(dir .. "/Main.m1scr")
@@ -470,10 +472,12 @@ describe("nvim-m1.project", function()
     local prj = dir .. "/Project.m1prj"
     vim.fn.writefile({
       '<?xml version="1.0"?>',
-      "<Project>",
+      "<MoTeCM1BuildSession>",
+      "  <Project>",
       '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
       '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
-      "</Project>",
+      "  </Project>",
+      "</MoTeCM1BuildSession>",
     }, prj)
     vim.cmd.edit(dir .. "/Main.m1scr")
 
@@ -649,10 +653,12 @@ describe("nvim-m1 next-gen additions", function()
     local prj = dir .. "/Project.m1prj"
     vim.fn.writefile({
       '<?xml version="1.0"?>',
-      "<Project>",
+      "<MoTeCM1BuildSession>",
+      "  <Project>",
       '  <Component Classname="BuiltIn.GroupCompound" Name="Root"/>',
       '  <Component Classname="BuiltIn.GroupCompound" Name="Root.Engine"/>',
-      "</Project>",
+      "  </Project>",
+      "</MoTeCM1BuildSession>",
     }, prj)
     vim.cmd.edit(dir .. "/Main.m1scr")
 
@@ -682,7 +688,11 @@ describe("nvim-m1 next-gen additions", function()
     end)
     local qf = vim.fn.getqflist({ title = true, items = true })
     assert.equals("m1-project validate", qf.title)
-    assert.equals(0, #qf.items, "clean fixture must produce no findings")
+    assert.equals(
+      0,
+      #qf.items,
+      "clean fixture must produce no findings: " .. vim.inspect(qf.items)
+    )
   end)
 
   it("statusline component is empty outside M1 buffers (#47)", function()
