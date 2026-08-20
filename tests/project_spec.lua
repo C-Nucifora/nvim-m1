@@ -818,9 +818,7 @@ describe("nvim-m1.project set_call_rate Hz case-insensitivity (#92)", function()
     vim.system = function(cmd, _, cb)
       captured_cmd = vim.deepcopy(cmd)
       -- Invoke the callback synchronously so drain() completes in-test.
-      vim.schedule(function()
-        cb({ code = 0, stdout = "", stderr = "" })
-      end)
+      cb({ code = 0, stdout = "", stderr = "" })
     end
 
     -- Simulate the user typing a script name then picking "100hz" (lowercase).
@@ -836,7 +834,7 @@ describe("nvim-m1.project set_call_rate Hz case-insensitivity (#92)", function()
     -- Allow vim.schedule callbacks (the drain completion handler) to run.
     assert.is_true(
       vim.wait(1000, function()
-        return captured_cmd ~= nil
+        return captured_cmd ~= nil and project.is_idle()
       end),
       "set_call_rate did not invoke vim.system within 1s"
     )
