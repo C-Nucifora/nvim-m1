@@ -10,6 +10,25 @@ local M = {}
 --- the name — keeping the Neovim integration in sync from one place.
 M.client_name = "m1lsp"
 
+--- Disable semantic-token range requests when the server also supports
+--- full/delta. Neovim can process a refresh's range response first, replace its
+--- full-token base with that viewport-sized slice, then apply the full/delta
+--- response to the wrong base and permanently stop highlighting at the initial
+--- overscan boundary. Full/delta remains enabled and supplies the whole file.
+---@param client vim.lsp.Client
+function M.on_init(client)
+  local capabilities = client.server_capabilities
+  local provider = capabilities and capabilities.semanticTokensProvider
+  if
+    type(provider) == "table"
+    and provider.range
+    and type(provider.full) == "table"
+    and provider.full.delta
+  then
+    provider.range = false
+  end
+end
+
 --- Resolve the m1-lsp executable: explicit override, then $PATH, then the
 --- bundled binary (installed by `:M1Install` / the lazy `build` hook).
 ---@param cfg NvimM1Config
@@ -67,6 +86,7 @@ function M.setup(cfg)
       filetypes = cfg.lsp_filetypes,
       root_markers = cfg.root_markers,
       capabilities = capabilities(cfg),
+      on_init = M.on_init,
       on_attach = cfg.on_attach,
       settings = cfg.settings,
       init_options = init_options,
@@ -94,6 +114,7 @@ function M.setup(cfg)
   end
   lspconfig.m1lsp.setup({
     capabilities = capabilities(cfg),
+    on_init = M.on_init,
     on_attach = cfg.on_attach,
     settings = cfg.settings,
     init_options = init_options,
