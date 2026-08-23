@@ -197,8 +197,8 @@ describe("nvim-m1.lint.run_builtin lints live buffer contents (#stdin)", functio
     -- The command reads stdin (trailing `-`) with the buffer name for reporting,
     -- and never passes the path as a positional file to read from disk.
     assert.equals("-", captured.cmd[#captured.cmd])
-    local joined = table.concat(captured.cmd, " ")
-    assert.is_truthy(joined:find("--stdin-filename /tmp/unsaved.m1scr", 1, true))
+    assert.equals("--stdin-filename", captured.cmd[#captured.cmd - 2])
+    assert.equals(vim.api.nvim_buf_get_name(buf), captured.cmd[#captured.cmd - 1])
   end)
 end)
 
