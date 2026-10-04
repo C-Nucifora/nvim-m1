@@ -30,7 +30,7 @@ local M = {}
 --- m1-vscode's `package.json` `serverVersion` pin.
 M.versions = {
   ["m1-lsp"] = "v0.50.3",
-  ["m1-fmt"] = "v0.17.1",
+  ["m1-fmt"] = "v0.18.2",
   ["m1-lint"] = "v0.24.1",
   ["m1-project"] = "v0.15.0",
 }
