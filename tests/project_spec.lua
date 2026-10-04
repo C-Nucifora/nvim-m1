@@ -1,6 +1,12 @@
 local project = require("nvim-m1.project")
 local config = require("nvim-m1.config")
 
+-- Command registration needs setup(), but these project fixtures deliberately
+-- exercise the real m1-project CLI only. Default setup also enables m1-lsp:
+-- each temporary project then starts a server, leaving RPC writes racing server
+-- exits at Neovim shutdown (EPIPE/SIGPIPE after otherwise passing assertions).
+-- LSP setup and notifications have dedicated tests; keep it disabled here.
+
 describe("nvim-m1.project", function()
   it("resolve_cmd prefers project_path, then $PATH", function()
     local cfg = config.resolve({ project_path = "/opt/m1-project" })
@@ -53,7 +59,7 @@ describe("nvim-m1.project", function()
   end)
 
   it("registers the project-editing user commands after setup", function()
-    require("nvim-m1").setup()
+    require("nvim-m1").setup({ lsp = false })
     local cmds = vim.api.nvim_get_commands({})
     assert.is_not_nil(cmds.M1CreateChannel)
     assert.is_not_nil(cmds.M1SetSecurity)
@@ -521,14 +527,14 @@ end)
 
 describe("nvim-m1 next-gen additions", function()
   it("registers M1SetType and M1SetUnit (#46)", function()
-    require("nvim-m1").setup()
+    require("nvim-m1").setup({ lsp = false })
     local cmds = vim.api.nvim_get_commands({})
     assert.is_not_nil(cmds.M1SetType)
     assert.is_not_nil(cmds.M1SetUnit)
   end)
 
   it("registers the m1-project v0.3.0 verbs (#51)", function()
-    require("nvim-m1").setup()
+    require("nvim-m1").setup({ lsp = false })
     local cmds = vim.api.nvim_get_commands({})
     assert.is_not_nil(cmds.M1CreateGroup)
     assert.is_not_nil(cmds.M1DeleteComponent)
@@ -537,7 +543,7 @@ describe("nvim-m1 next-gen additions", function()
   end)
 
   it("registers M1CreateConstant and M1CreateTable (#76)", function()
-    require("nvim-m1").setup()
+    require("nvim-m1").setup({ lsp = false })
     local cmds = vim.api.nvim_get_commands({})
     assert.is_not_nil(cmds.M1CreateConstant)
     assert.is_not_nil(cmds.M1CreateTable)
@@ -1691,6 +1697,23 @@ describe("nvim-m1.project.validate --json (maintainability)", function()
       1,
       #last_qf.items,
       "an unknown level (INFO/HINT) must still appear, not vanish"
+    )
+  end)
+end)
+
+describe("project fixture process isolation", function()
+  it("does not enable or leave language servers running", function()
+    local name = require("nvim-m1.lsp").client_name
+    if vim.lsp.is_enabled then
+      assert.is_false(
+        vim.lsp.is_enabled(name),
+        "project fixture setup must not enable automatic LSP startup"
+      )
+    end
+    assert.same(
+      {},
+      vim.lsp.get_clients({ name = name }),
+      "project fixtures must not leave servers writing RPC at test-process exit"
     )
   end)
 end)
