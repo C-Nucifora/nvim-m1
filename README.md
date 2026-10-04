@@ -77,6 +77,11 @@ discovers it and it overrides `settings` (see the
 [m1-tools configuration docs](https://github.com/C-Nucifora/m1-tools#configuration)).
 Generate one via `:M1GenerateConfig`.
 
+To opt into aligning comparisons and logical operators in wrapped conditions,
+use `settings = { format = { align_conditions = true } }` in the plugin setup,
+or set `align_conditions = true` under `[format]` in `m1-tools.toml`. The
+default is `false`; the same setting reaches the server at initialization.
+
 ### Commands
 
 | Command | Action |
