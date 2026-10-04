@@ -2,3 +2,4 @@
 .luarc.jsonc
 *.swp
 *~
+__pycache__/

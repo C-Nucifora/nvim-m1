@@ -77,6 +77,22 @@ discovers it and it overrides `settings` (see the
 [m1-tools configuration docs](https://github.com/C-Nucifora/m1-tools#configuration)).
 Generate one via `:M1GenerateConfig`.
 
+### Bundled toolchain update proposals
+
+A daily workflow checks all four bundled tools for newer stable GitHub
+releases. It proposes a pin update and one patch bump of `VERSION` only after
+all three supported platform binaries and their `SHA256SUMS` entries exist.
+Native GitHub asset digests are checked against the manifest when available.
+Incomplete releases fail validation without changing the pins. Repeated runs
+leave an identical open proposal branch untouched so approvals are preserved.
+
+The workflow needs a repository secret named `GH_PAT` with permission to push
+branches and create pull requests. Its pushes must trigger the normal PR CI;
+the workflow reports a setup error if the secret is absent. It neither
+auto-merges proposals nor publishes to an editor marketplace. Review, approval
+and merge trigger the existing `VERSION` release workflow; plugin-manager
+updates then pick up the released plugin and its bundled tool pins.
+
 ### Commands
 
 | Command | Action |
