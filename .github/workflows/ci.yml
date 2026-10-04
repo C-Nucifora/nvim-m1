@@ -18,6 +18,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sync-validation:
+    name: Toolchain update validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - run: python3 scripts/test-sync-toolchain.py
+
   stylua:
     name: Lua Format
     runs-on: ubuntu-latest
