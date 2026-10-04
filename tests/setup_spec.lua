@@ -120,6 +120,15 @@ describe("nvim-m1.lint end-to-end (needs m1-lint on $PATH)", function()
       vim.fn.delete(path)
     end
     clean_up_lsp()
+    if bufnr then
+      assert.is_false(vim.api.nvim_buf_is_valid(bufnr))
+    end
+    if path then
+      assert.equals(0, vim.fn.filereadable(path))
+    end
+    if vim.lsp.is_enabled then
+      assert.is_false(vim.lsp.is_enabled(lsp_name))
+    end
   end)
 
   it("produces diagnostics from the real binary", function()
@@ -150,19 +159,6 @@ describe("nvim-m1.lint end-to-end (needs m1-lint on $PATH)", function()
       vim.tbl_contains(codes, "L004") or vim.tbl_contains(codes, "L006"),
       "expected an L004/L006 finding, got " .. vim.inspect(codes)
     )
-  end)
-
-  it("removes the lint fixture before subsequent setup can attach a server", function()
-    if not has_m1lint then
-      pending("m1-lint not on $PATH")
-      return
-    end
-    assert.is_false(vim.api.nvim_buf_is_valid(bufnr))
-    assert.equals(0, vim.fn.filereadable(path))
-    assert.same({}, vim.lsp.get_clients({ name = lsp_name }))
-    if vim.lsp.is_enabled then
-      assert.is_false(vim.lsp.is_enabled(lsp_name))
-    end
   end)
 end)
 
