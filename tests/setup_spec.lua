@@ -1,7 +1,49 @@
 local nvim_m1 = require("nvim-m1")
 local lint = require("nvim-m1.lint")
+local lsp_name = require("nvim-m1.lsp").client_name
+
+-- setup() coverage deliberately exercises native LSP registration. Disable
+-- automatic attachment between cases, and await only clients this case owns,
+-- before the next fixture can open an M1 buffer. Wait here in teardown, never
+-- inside an async callback or another vim.wait predicate.
+local existing_clients
+local function remember_clients()
+  existing_clients = {}
+  for _, client in ipairs(vim.lsp.get_clients({ name = lsp_name })) do
+    existing_clients[client.id] = true
+  end
+end
+
+local function clean_up_lsp()
+  if vim.lsp.enable then
+    vim.lsp.enable(lsp_name, false)
+  end
+  local owned = {}
+  for _, client in ipairs(vim.lsp.get_clients({ name = lsp_name })) do
+    if not existing_clients[client.id] then
+      owned[#owned + 1] = client.id
+    end
+  end
+  if #owned > 0 then
+    vim.lsp.stop_client(owned)
+    assert.is_true(
+      vim.wait(5000, function()
+        for _, client in ipairs(vim.lsp.get_clients({ name = lsp_name })) do
+          if not existing_clients[client.id] then
+            return false
+          end
+        end
+        return true
+      end, 10),
+      "test-owned language servers must exit before the next fixture"
+    )
+  end
+end
 
 describe("nvim-m1.setup", function()
+  before_each(remember_clients)
+  after_each(clean_up_lsp)
+
   it("runs cleanly and is idempotent", function()
     assert.has_no.errors(function()
       nvim_m1.setup()
@@ -64,6 +106,21 @@ end)
 
 describe("nvim-m1.lint end-to-end (needs m1-lint on $PATH)", function()
   local has_m1lint = vim.fn.executable("m1-lint") == 1
+  local path, bufnr
+
+  before_each(function()
+    remember_clients()
+    nvim_m1.setup({ lsp = false, lint_on_save = false, format_on_save = false })
+  end)
+  after_each(function()
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
+    if path then
+      vim.fn.delete(path)
+    end
+    clean_up_lsp()
+  end)
 
   it("produces diagnostics from the real binary", function()
     if not has_m1lint then
@@ -71,10 +128,10 @@ describe("nvim-m1.lint end-to-end (needs m1-lint on $PATH)", function()
       return
     end
     -- Synthetic script that trips L004 (== over eq) and L006 (float ==).
-    local path = vim.fn.tempname() .. ".m1scr"
+    path = vim.fn.tempname() .. ".m1scr"
     vim.fn.writefile({ "Number x", "  if x == 1.0", "  end", "end" }, path)
 
-    local bufnr = vim.fn.bufadd(path)
+    bufnr = vim.fn.bufadd(path)
     vim.fn.bufload(bufnr)
     vim.api.nvim_set_current_buf(bufnr)
 
@@ -94,6 +151,19 @@ describe("nvim-m1.lint end-to-end (needs m1-lint on $PATH)", function()
       "expected an L004/L006 finding, got " .. vim.inspect(codes)
     )
   end)
+
+  it("removes the lint fixture before subsequent setup can attach a server", function()
+    if not has_m1lint then
+      pending("m1-lint not on $PATH")
+      return
+    end
+    assert.is_false(vim.api.nvim_buf_is_valid(bufnr))
+    assert.equals(0, vim.fn.filereadable(path))
+    assert.same({}, vim.lsp.get_clients({ name = lsp_name }))
+    if vim.lsp.is_enabled then
+      assert.is_false(vim.lsp.is_enabled(lsp_name))
+    end
+  end)
 end)
 
 describe("nvim-m1.setup toolchain self-heal (#26)", function()
@@ -101,6 +171,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
   local saved_stale, saved_install, saved_notify
 
   before_each(function()
+    remember_clients()
     saved_stale = install.stale_tools
     saved_install = install.install_async
     saved_notify = vim.notify
@@ -114,6 +185,7 @@ describe("nvim-m1.setup toolchain self-heal (#26)", function()
     install.stale_tools = saved_stale
     install.install_async = saved_install
     vim.notify = saved_notify
+    clean_up_lsp()
   end)
 
   it("reinstalls exactly the stale tools when the bundle is out of date", function()
