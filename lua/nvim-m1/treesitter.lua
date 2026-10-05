@@ -138,6 +138,32 @@ local function compile_parser(dir, fingerprint)
     vim.fn.delete(temporary)
     return false, "compiling the m1 parser failed: " .. res
   end
+  -- language.add() returns true immediately for a language already loaded in
+  -- this session, even if the replacement has missing symbols or an invalid ABI.
+  -- Validate in a configless child before replacing the working binary.
+  local validate = string.format(
+    "local ok, loaded = pcall(vim.treesitter.language.add, 'm1', { path = %q }); "
+      .. "if not ok or loaded ~= true then "
+      .. "io.stderr:write(tostring(loaded or 'parser could not be loaded')); "
+      .. "vim.cmd('cquit 1') end; vim.cmd('qa!')",
+    temporary
+  )
+  local validation = vim.fn.system({
+    vim.v.progpath,
+    "--clean",
+    "--headless",
+    "--noplugin",
+    "-u",
+    "NONE",
+    "-i",
+    "NONE",
+    "-c",
+    "lua " .. validate,
+  })
+  if vim.v.shell_error ~= 0 then
+    vim.fn.delete(temporary)
+    return false, "validating the rebuilt m1 parser failed: " .. validation
+  end
   local renamed, rename_err = (vim.uv or vim.loop).fs_rename(temporary, out)
   if not renamed then
     vim.fn.delete(temporary)

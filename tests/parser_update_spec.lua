@@ -105,8 +105,52 @@ describe("nvim-m1 parser updates (integration)", function()
       append(fixture .. "/src/parser.c", "\nthis is not valid C;\n")
       assert.is_true(ts.register(cfg), "failed update must retain the working parser")
       assert.equals(1, builds)
-      assert.equals(old_binary, read(out))
+      assert.is_true(
+        old_binary == read(out),
+        "failed compilation must preserve the working binary"
+      )
       assert.equals(old_stamp, read(stamp), "failed update must not record success")
+    end
+  )
+
+  it(
+    "keeps the working parser when compiled sources export the wrong symbol",
+    function()
+      local old_binary, old_stamp = read(out), read(stamp)
+      local parser_source = fixture .. "/src/parser.c"
+      local source, renamed = read(parser_source):gsub(
+        "tree_sitter_m1%(void%)",
+        "tree_sitter_missing_m1(void)"
+      )
+      assert.equals(1, renamed, "the fixture must change the parser's exported symbol")
+      local file = assert(io.open(parser_source, "w"))
+      file:write(source)
+      file:close()
+
+      local compile_succeeded = false
+      local system = vim.fn.system
+      vim.fn.system = function(cmd, ...)
+        local result = system(cmd, ...)
+        if type(cmd) == "table" and cmd[1] == ts.find_cc() then
+          compile_succeeded = vim.v.shell_error == 0
+        end
+        return result
+      end
+      assert.is_true(
+        ts.register(cfg),
+        "failed validation must retain the loaded parser"
+      )
+      assert.is_true(compile_succeeded, "this regression must pass the real C compiler")
+      assert.equals(1, builds)
+      assert.is_true(
+        old_binary == read(out),
+        "invalid replacement must not replace the working binary"
+      )
+      assert.equals(
+        old_stamp,
+        read(stamp),
+        "invalid replacement must not record success"
+      )
     end
   )
 
