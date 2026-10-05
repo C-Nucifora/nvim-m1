@@ -6,8 +6,30 @@ local project = require("nvim-m1.project")
 local config = require("nvim-m1.config")
 
 describe("nvim-m1.project.security_matrix", function()
+  local existing_buffers, fixture_dir
+  before_each(function()
+    existing_buffers = {}
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      existing_buffers[buf] = true
+    end
+  end)
+  after_each(function()
+    -- Matrix scratch buffers and the real-CLI fixture belong to this case.
+    -- Remove them before later setup can attach a server to a stale M1 buffer.
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if not existing_buffers[buf] and vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+    end
+    if fixture_dir then
+      vim.fn.delete(fixture_dir, "rf")
+      fixture_dir = nil
+    end
+  end)
+
   it("registers the :M1SecurityMatrix user command after setup", function()
-    require("nvim-m1").setup()
+    -- Matrix queries use m1-project; native LSP setup is covered separately.
+    require("nvim-m1").setup({ lsp = false })
     local cmds = vim.api.nvim_get_commands({})
     assert.is_not_nil(cmds.M1SecurityMatrix, "M1SecurityMatrix registered")
   end)
@@ -212,6 +234,7 @@ describe("nvim-m1.project.security_matrix", function()
       return
     end
     local dir = vim.fn.tempname()
+    fixture_dir = dir
     vim.fn.mkdir(dir, "p")
     local prj = dir .. "/Project.m1prj"
     vim.fn.writefile({

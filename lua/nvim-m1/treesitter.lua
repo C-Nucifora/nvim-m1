@@ -13,7 +13,7 @@
 --- This module now provisions tree-sitter using only Neovim core, so it works
 --- regardless of which nvim-treesitter branch (or none) is installed:
 ---   * compiles tree-sitter-m1's `parser.c` (+ `scanner.c`) into a site
----     `parser/m1.so` when the parser isn't already loadable, and
+---     `parser/m1.so` when missing or its source fingerprint changes, and
 ---   * registers the queries directly from the grammar's `queries/*.scm` via
 ---     `vim.treesitter.query.set`, so they apply without depending on the
 ---     `queries/m1/` runtime layout.
@@ -70,34 +70,117 @@ function M.find_cc()
   return ""
 end
 
+--- Hash compiler inputs, including optional scanner and bundled headers. Plugin
+--- updates can change these without changing the generated parser's ABI/version.
+---@param dir string
+---@return string? fingerprint
+local function source_fingerprint(dir)
+  local src = dir .. "/src"
+  local files = { src .. "/parser.c" }
+  if vim.fn.filereadable(src .. "/scanner.c") == 1 then
+    files[#files + 1] = src .. "/scanner.c"
+  end
+  vim.list_extend(files, vim.fn.globpath(src, "**/*.h", false, true))
+  table.sort(files)
+  local inputs = {}
+  for _, path in ipairs(files) do
+    local file = io.open(path, "rb")
+    if not file then
+      return nil
+    end
+    local contents = file:read("*a")
+    file:close()
+    inputs[#inputs + 1] = path:sub(#src + 2) .. ":" .. vim.fn.sha256(contents)
+  end
+  return vim.fn.sha256(table.concat(inputs, "\n"))
+end
+
+local function parser_paths()
+  local out = vim.fn.stdpath("data") .. "/site/parser/m1.so"
+  return out, out .. ".sha256"
+end
+
+local function recorded_fingerprint(path)
+  local file = io.open(path, "r")
+  if not file then
+    return nil
+  end
+  local fingerprint = file:read("*l")
+  file:close()
+  return fingerprint
+end
+
 --- Compile tree-sitter-m1's parser into a site `parser/m1.so` and load it.
 ---@param dir string  tree-sitter-m1 plugin dir
+---@param fingerprint string
 ---@return boolean ok, string? err
-local function compile_parser(dir)
+local function compile_parser(dir, fingerprint)
   local cc = M.find_cc()
   if cc == "" then
     return false, "no C compiler (cc/gcc/clang) on $PATH to build the m1 parser"
   end
 
-  local out = vim.fn.stdpath("data") .. "/site/parser/m1.so"
+  local out, stamp = parser_paths()
   vim.fn.mkdir(vim.fn.fnamemodify(out, ":h"), "p")
 
+  -- Never truncate a library that Neovim may already have mapped. A sibling
+  -- temporary file also preserves the working parser when compilation fails.
+  local temporary = out .. "." .. vim.fn.fnamemodify(vim.fn.tempname(), ":t")
   local src = dir .. "/src"
   local cmd =
-    { cc, "-o", out, "-shared", "-Os", "-fPIC", "-I", src, src .. "/parser.c" }
+    { cc, "-o", temporary, "-shared", "-Os", "-fPIC", "-I", src, src .. "/parser.c" }
   if vim.fn.filereadable(src .. "/scanner.c") == 1 then
     table.insert(cmd, src .. "/scanner.c")
   end
 
   local res = vim.fn.system(cmd)
   if vim.v.shell_error ~= 0 then
+    vim.fn.delete(temporary)
     return false, "compiling the m1 parser failed: " .. res
+  end
+  -- language.add() returns true immediately for a language already loaded in
+  -- this session, even if the replacement has missing symbols or an invalid ABI.
+  -- Validate in a configless child before replacing the working binary.
+  local validate = string.format(
+    "local ok, loaded = pcall(vim.treesitter.language.add, 'm1', { path = %q }); "
+      .. "if not ok or loaded ~= true then "
+      .. "io.stderr:write(tostring(loaded or 'parser could not be loaded')); "
+      .. "vim.cmd('cquit 1') end; vim.cmd('qa!')",
+    temporary
+  )
+  local validation = vim.fn.system({
+    vim.v.progpath,
+    "--clean",
+    "--headless",
+    "--noplugin",
+    "-u",
+    "NONE",
+    "-i",
+    "NONE",
+    "-c",
+    "lua " .. validate,
+  })
+  if vim.v.shell_error ~= 0 then
+    vim.fn.delete(temporary)
+    return false, "validating the rebuilt m1 parser failed: " .. validation
+  end
+  local renamed, rename_err = (vim.uv or vim.loop).fs_rename(temporary, out)
+  if not renamed then
+    vim.fn.delete(temporary)
+    return false, "installing the rebuilt m1 parser failed: " .. tostring(rename_err)
   end
 
   -- Load the freshly-built parser explicitly (the negative result of an earlier
   -- language.add in this session may otherwise be cached).
   local ok, loaded = pcall(vim.treesitter.language.add, "m1", { path = out })
   if ok and loaded == true then
+    -- Record success only after compilation and loading. Missing/old stamps
+    -- deliberately trigger one rebuild when migrating an existing install.
+    local wrote, write_result = pcall(vim.fn.writefile, { fingerprint }, stamp)
+    if not wrote or write_result ~= 0 then
+      return false,
+        "recording the m1 parser fingerprint failed: " .. tostring(write_result)
+    end
     return true
   end
   return false, "built the m1 parser but it failed to load: " .. tostring(loaded)
@@ -154,30 +237,43 @@ function M.register(cfg)
 
   local dir = grammar_dir()
   register_with_nvim_treesitter(dir)
+  local fingerprint = dir and source_fingerprint(dir) or nil
+  local out, stamp = parser_paths()
+  local stale = fingerprint
+    and (vim.fn.filereadable(out) ~= 1 or recorded_fingerprint(stamp) ~= fingerprint)
+
+  -- Check freshness before parser_installed() loads the old library. Neovim
+  -- keeps a loaded language for the session; an update during a live session
+  -- replaces the on-disk parser safely and takes effect on the next launch.
+  if cfg.auto_install_parser and fingerprint then
+    local loaded = false
+    if not stale then
+      -- Prefer the parser whose fingerprint we checked over an older legacy
+      -- installer output that happens to appear earlier on the runtimepath.
+      local ok, result = pcall(vim.treesitter.language.add, "m1", { path = out })
+      loaded = ok and result == true
+    end
+    if stale or not loaded then
+      local built, err = compile_parser(dir, fingerprint)
+      if not built then
+        vim.schedule(function()
+          vim.notify(
+            "nvim-m1: "
+              .. (err or "could not build the m1 parser")
+              .. " (see :checkhealth nvim-m1)",
+            vim.log.levels.WARN
+          )
+        end)
+      end
+    end
+  end
+
   if dir then
     register_queries(dir)
   end
-
-  if M.parser_installed() then
-    return true
-  end
-
-  if cfg.auto_install_parser and dir then
-    local built, err = compile_parser(dir)
-    if not built then
-      vim.schedule(function()
-        vim.notify(
-          "nvim-m1: "
-            .. (err or "could not build the m1 parser")
-            .. " (see :checkhealth nvim-m1)",
-          vim.log.levels.WARN
-        )
-      end)
-    end
-    return built
-  end
-
-  return false
+  -- Without sources or auto-install, retain any externally managed parser.
+  -- A failed rebuild can also keep the previous working parser available.
+  return M.parser_installed()
 end
 
 --- Start tree-sitter highlighting on a buffer (no-op if the parser is missing).

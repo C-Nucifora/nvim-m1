@@ -12,7 +12,7 @@
 describe("nvim-m1 proj_cmd routing", function()
   it("routes every single-arg project verb through the proj_cmd helper", function()
     local m = require("nvim-m1")
-    m.setup()
+    m.setup({ lsp = false })
     assert.is_table(m._proj_cmds, "proj_cmd must record the verbs it registers")
     for _, name in ipairs({
       "M1CreateChannel",
@@ -42,7 +42,7 @@ describe("nvim-m1 proj_cmd routing", function()
   -- a suffix override; assert both the default-suffix shape and the override.
   it("builds the right desc — default suffix and suffix override", function()
     local m = require("nvim-m1")
-    m.setup()
+    m.setup({ lsp = false })
     assert.are.equal(
       "nvim-m1: rename a component + its trigger references (m1-project)",
       m._proj_cmds.M1RenameComponent,
