@@ -54,6 +54,11 @@ Highlighting works through Neovim core — the plugin compiles and registers
 the parser itself, so it does not depend on a particular nvim-treesitter
 branch.
 
+The compiled parser tracks a fingerprint of its C sources and headers. After
+updating `tree-sitter-m1`, the next setup rebuilds stale parsers automatically,
+including existing installs without a fingerprint. Restart Neovim after updating
+an already loaded grammar; Neovim retains loaded languages for the session.
+
 ### Options
 
 | Key | Default | Description |
@@ -65,7 +70,7 @@ branch.
 | `filetypes` | `{ "m1scr" }` | Script filetypes to wire. |
 | `attach_m1prj` | `true` | Also attach m1-lsp to `Project.m1prj` (rename a channel from its declaration). |
 | `root_markers` | `{ "Project.m1prj", ".git" }` | Files marking a project root. |
-| `auto_install_parser` | `true` | Install the `m1` parser if missing. |
+| `auto_install_parser` | `true` | Build the `m1` parser when missing or grammar sources change. |
 | `lint_on_insert_leave` | `false` | Also lint on `InsertLeave`. |
 | `codelens` | `true` | Show m1-lsp code lenses (e.g. a script's `⚡ N Hz` rate); run the lens under the cursor with `:M1CodeLensRun`. |
 | `capabilities` / `on_attach` | — | Forwarded to the LSP client. |
@@ -76,6 +81,11 @@ extension), commit an `m1-tools.toml` to the project root — the server
 discovers it and it overrides `settings` (see the
 [m1-tools configuration docs](https://github.com/C-Nucifora/m1-tools#configuration)).
 Generate one via `:M1GenerateConfig`.
+
+To opt into aligning comparisons and logical operators in wrapped conditions,
+use `settings = { format = { align_conditions = true } }` in the plugin setup,
+or set `align_conditions = true` under `[format]` in `m1-tools.toml`. The
+default is `false`; the same setting reaches the server at initialization.
 
 ### Bundled toolchain update proposals
 
