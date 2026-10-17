@@ -151,12 +151,13 @@ end
 --- Publishes into our namespace. (mirrors format.lua's stdin pattern.)
 ---@param bufnr integer
 function M.run_builtin(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  bufnr = bufnr and bufnr ~= 0 and bufnr or vim.api.nvim_get_current_buf()
   local cmd = require("nvim-m1.install").resolve("m1-lint")
   if not cmd then
     return
   end
   local path = vim.api.nvim_buf_get_name(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
   local source = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
     .. "\n"
   local args = { cmd, "--format", "json" }
@@ -169,7 +170,13 @@ function M.run_builtin(bufnr)
     args,
     { text = true, stdin = source },
     vim.schedule_wrap(function(res)
-      if not vim.api.nvim_buf_is_valid(bufnr) then
+      if
+        not vim.api.nvim_buf_is_valid(bufnr)
+        or not vim.api.nvim_buf_is_loaded(bufnr)
+        or vim.api.nvim_buf_get_changedtick(bufnr) ~= tick
+        or vim.api.nvim_buf_get_name(bufnr) ~= path
+        or M.lsp_attached(bufnr)
+      then
         return
       end
       local items = M.parse(
