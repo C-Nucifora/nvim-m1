@@ -85,7 +85,7 @@ local function drain(prj)
   end
   q.running = true
   local job = table.remove(q.pending, 1)
-  vim.system(job.cmd, { text = true }, function(res)
+  local function complete(res)
     vim.schedule(function()
       local ok = res.code == 0
       if ok then
@@ -107,7 +107,11 @@ local function drain(prj)
       end
       drain(prj) -- next queued mutation for this project, in submission order
     end)
-  end)
+  end
+  local started, err = pcall(vim.system, job.cmd, { text = true }, complete)
+  if not started then
+    complete({ code = -1, stderr = tostring(err) })
+  end
 end
 
 --- Run `m1-project <args>` against the project; on success, reload the LSP.
