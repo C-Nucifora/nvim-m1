@@ -12,7 +12,7 @@ local M = {}
 ---                                   can be renamed from its declaration (default: true).
 ---@field root_markers string[]      Files that mark a project root (default: { "Project.m1prj", ".git" }).
 ---@field treesitter boolean         Register + start the `m1` tree-sitter parser (default: true).
----@field auto_install_parser boolean  Run :TSInstall m1 if the parser is missing (default: true).
+---@field auto_install_parser boolean  Compile the parser when missing or grammar sources change (default: true).
 ---@field lsp boolean                Register + enable m1-lsp (default: true).
 ---@field capabilities? table        LSP client capabilities (default: blink.cmp's if present, else stock).
 ---@field on_attach? fun(client:vim.lsp.Client, bufnr:integer)  Extra per-buffer LSP setup.

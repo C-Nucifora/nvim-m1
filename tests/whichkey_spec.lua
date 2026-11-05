@@ -20,7 +20,7 @@ describe("nvim-m1.whichkey", function()
   end)
 
   it("binds every global :M1 command (no drift from init.lua)", function()
-    require("nvim-m1").setup()
+    require("nvim-m1").setup({ lsp = false })
 
     local added
     package.loaded["which-key"] = {
@@ -57,7 +57,7 @@ describe("nvim-m1.whichkey", function()
 
   it("labels come from the command registry, not hard-coded strings", function()
     local m = require("nvim-m1")
-    m.setup()
+    m.setup({ lsp = false })
 
     local added
     package.loaded["which-key"] = {
