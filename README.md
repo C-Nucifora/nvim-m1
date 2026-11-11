@@ -87,6 +87,14 @@ use `settings = { format = { align_conditions = true } }` in the plugin setup,
 or set `align_conditions = true` under `[format]` in `m1-tools.toml`. The
 default is `false`; the same setting reaches the server at initialization.
 
+Installs use a lock in `stdpath("data")/nvim-m1/bin/.install-lock`, shared
+by all Neovim sessions using that data directory. Wait for the active install
+before retrying a rejected request. The lock is removed on completion and
+normal editor exit. A forced termination can leave it behind. Check the PID
+in its `owner` file and confirm no installation is running before removing
+that directory and retrying. Downloads and manifest updates use separate
+unique temporary files; an abandoned download is never reused.
+
 ### Bundled toolchain update proposals
 
 A daily workflow checks all four bundled tools for newer stable GitHub
