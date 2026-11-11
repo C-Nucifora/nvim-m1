@@ -33,12 +33,13 @@ function M.notify_reload(prj)
   local name = require("nvim-m1.lsp").client_name
   local uri = vim.uri_from_fname(prj)
   for _, client in ipairs(vim.lsp.get_clients({ name = name })) do
-    -- Colon (method) form: `client.notify` (dot form) is deprecated in Neovim
-    -- 0.12 and a hard error in 0.13 (#87). Older 0.10/0.11 clients still expose
-    -- `:notify`, so this is backwards-compatible.
-    client:notify("workspace/didChangeWatchedFiles", {
-      changes = { { uri = uri, type = 2 } }, -- 2 = Changed
-    })
+    local params = { changes = { { uri = uri, type = 2 } } }
+    if vim.fn.has("nvim-0.11") == 1 then
+      client:notify("workspace/didChangeWatchedFiles", params)
+    else
+      -- Neovim 0.10 binds notify to the client already.
+      client.notify("workspace/didChangeWatchedFiles", params)
+    end
   end
 end
 
@@ -85,29 +86,53 @@ local function drain(prj)
   end
   q.running = true
   local job = table.remove(q.pending, 1)
-  vim.system(job.cmd, { text = true }, function(res)
+  local completed = false
+  local function guarded(label, callback, ...)
+    local ok, err = pcall(callback, ...)
+    if not ok then
+      -- A failed UI callback must not strand a mutation that already wrote.
+      pcall(
+        vim.notify,
+        "nvim-m1: " .. label .. ": " .. tostring(err),
+        vim.log.levels.ERROR
+      )
+    end
+  end
+  local function complete(res)
+    if completed then
+      return
+    end
+    completed = true
     vim.schedule(function()
       local ok = res.code == 0
+      local err
       if ok then
-        M.notify_reload(prj)
+        guarded("project saved but LSP reload failed", M.notify_reload, prj)
         if job.on_success then
-          job.on_success(res)
+          guarded("project success callback failed", job.on_success, res)
         elseif job.ok_msg then
-          vim.notify("nvim-m1: " .. job.ok_msg)
+          guarded("project notification failed", vim.notify, "nvim-m1: " .. job.ok_msg)
         end
       else
-        vim.notify(
-          "nvim-m1: m1-project failed: " .. (res.stderr or res.stdout or ""),
+        err = res.stderr or res.stdout or ""
+        guarded(
+          "project notification failed",
+          vim.notify,
+          "nvim-m1: m1-project failed: " .. err,
           vim.log.levels.ERROR
         )
       end
-      q.running = false
       if job.on_done then
-        job.on_done(ok, ok and nil or (res.stderr or res.stdout or ""))
+        guarded("project completion callback failed", job.on_done, ok, err)
       end
-      drain(prj) -- next queued mutation for this project, in submission order
+      q.running = false
+      drain(prj) -- include any work enqueued by the completion callback
     end)
-  end)
+  end
+  local started, err = pcall(vim.system, job.cmd, { text = true }, complete)
+  if not started then
+    complete({ code = -1, stderr = tostring(err) })
+  end
 end
 
 --- Run `m1-project <args>` against the project; on success, reload the LSP.
