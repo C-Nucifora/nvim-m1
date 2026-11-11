@@ -8,6 +8,39 @@ local M = {}
 
 local NS = vim.api.nvim_create_namespace("nvim-m1-lint")
 local GROUP = "NvimM1Lint"
+local runs = {}
+local registered_linter
+
+local function concrete_buffer(bufnr)
+  return (bufnr == nil or bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
+end
+
+local function capture(bufnr)
+  local run = {
+    bufnr = bufnr,
+    tick = vim.api.nvim_buf_get_changedtick(bufnr),
+    path = vim.api.nvim_buf_get_name(bufnr),
+    source = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+      .. "\n",
+  }
+  runs[bufnr] = run
+  return run
+end
+
+local function current(run)
+  return runs[run.bufnr] == run
+    and vim.api.nvim_buf_is_valid(run.bufnr)
+    and vim.api.nvim_buf_is_loaded(run.bufnr)
+    and vim.api.nvim_buf_get_changedtick(run.bufnr) == run.tick
+    and vim.api.nvim_buf_get_name(run.bufnr) == run.path
+    and not M.lsp_attached(run.bufnr)
+end
+
+local function finish(run)
+  if runs[run.bufnr] == run then
+    runs[run.bufnr] = nil
+  end
+end
 
 --- The namespace the standalone fallback linter publishes into. Exposed for
 --- tests and for callers that need to clear a stale standalone run (e.g. when
@@ -22,8 +55,13 @@ end
 --- linger doubled. (#25)
 ---@param bufnr integer
 local function clear_ns(bufnr)
+  runs[bufnr] = nil
   if vim.api.nvim_buf_is_valid(bufnr) then
     vim.diagnostic.reset(NS, bufnr)
+    local ok, backend = pcall(require, "lint")
+    if ok and backend.get_namespace then
+      vim.diagnostic.reset(backend.get_namespace("m1_lint"), bufnr)
+    end
   end
 end
 
@@ -41,19 +79,59 @@ local function severity(sev)
   return map[(sev or ""):lower()] or vim.diagnostic.severity.WARN
 end
 
---- Convert one m1-lint diagnostic record to a vim.diagnostic item.
---- m1-lint positions are 0-indexed (line/column), matching vim.diagnostic.
----@param d table
----@return table
-local function to_item(d)
+--- Resolve report offsets against the exact UTF-8 text submitted to the linter.
+local function positions(source)
+  if not source then
+    return function(pos)
+      return pos.line or 0, pos.column or 0
+    end
+  end
+  local starts = { 0 }
+  for offset in source:gmatch("()\n") do
+    table.insert(starts, offset)
+  end
+  return function(pos, byte)
+    if type(byte) == "number" and byte >= 0 and byte <= #source then
+      local lo, hi = 1, #starts
+      while lo < hi do
+        local mid = math.floor((lo + hi + 1) / 2)
+        if starts[mid] <= byte then
+          lo = mid
+        else
+          hi = mid - 1
+        end
+      end
+      return lo - 1, byte - starts[lo]
+    end
+    local line = math.min(pos.line or 0, #starts - 1)
+    local start = starts[line + 1]
+    local text = source:sub(start + 1, (starts[line + 2] or (#source + 1)) - 1)
+    local column = math.max(0, pos.column or 0)
+    local count = 0
+    for offset in text:gmatch("()[^\128-\191]") do
+      if count == column then
+        return line, offset - 1
+      end
+      count = count + 1
+    end
+    return line, #text
+  end
+end
+
+--- Convert scalar report positions or byte offsets into Neovim byte columns.
+local function to_item(d, position)
   local r = d.range or {}
   local s = r.start or {}
-  local e = r["end"] or s
+  local e = r["end"] or {}
+  e = { line = e.line or s.line, column = e.column or s.column }
+  local bytes = d.byte_range or {}
+  local line, column = position(s, bytes.start)
+  local end_line, end_column = position(e, bytes["end"])
   return {
-    lnum = s.line or 0,
-    col = s.column or 0,
-    end_lnum = e.line or s.line or 0,
-    end_col = e.column or s.column or 0,
+    lnum = line,
+    col = column,
+    end_lnum = end_line,
+    end_col = end_column,
     severity = severity(d.severity),
     message = d.message or "",
     code = d.code,
@@ -68,8 +146,9 @@ end
 --- return; nil takes the first file.
 ---@param output string  Raw stdout from `m1-lint --format json`.
 ---@param path? string   Absolute path of the buffer being linted.
+---@param source? string Exact UTF-8 stdin text; needed for Unicode byte columns.
 ---@return table[] items
-function M.parse(output, path)
+function M.parse(output, path, source)
   if not output or output == "" then
     return {}
   end
@@ -99,17 +178,19 @@ function M.parse(output, path)
   end
 
   local items = {}
+  local position = positions(source)
   for _, d in ipairs(file.syntax_errors or {}) do
-    table.insert(items, to_item(d))
+    table.insert(items, to_item(d, position))
   end
   for _, d in ipairs(file.diagnostics or {}) do
-    table.insert(items, to_item(d))
+    table.insert(items, to_item(d, position))
   end
   return items
 end
 
---- The nvim-lint linter definition for m1-lint (bundled binary when not on $PATH).
+--- Build a fresh nvim-lint definition per invocation so its source cannot drift.
 function M.linter()
+  local run = capture(vim.api.nvim_get_current_buf())
   return {
     -- Resolve the binary per run, not once at setup(): a later `:M1Install`
     -- that makes m1-lint resolvable must take effect without a re-setup — a
@@ -137,8 +218,25 @@ function M.linter()
     stream = "stdout",
     ignore_exitcode = true, -- exit 1 means "found lint", not "crashed"
     parser = function(output, bufnr)
-      local path = bufnr and vim.api.nvim_buf_get_name(bufnr) or nil
-      return M.parse(output, path)
+      local valid = bufnr == run.bufnr and current(run)
+      finish(run)
+      if valid then
+        return M.parse(output, run.path, run.source)
+      end
+      -- nvim-lint must publish to close its pipes. Keep newer results intact.
+      local ok, backend = pcall(require, "lint")
+      if
+        ok
+        and backend.get_namespace
+        and vim.api.nvim_buf_is_valid(bufnr)
+        and not M.lsp_attached(bufnr)
+      then
+        return vim.diagnostic.get(
+          bufnr,
+          { namespace = backend.get_namespace("m1_lint") }
+        )
+      end
+      return {}
     end,
   }
 end
@@ -151,34 +249,44 @@ end
 --- Publishes into our namespace. (mirrors format.lua's stdin pattern.)
 ---@param bufnr integer
 function M.run_builtin(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  bufnr = concrete_buffer(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
+    return
+  end
+  if M.lsp_attached(bufnr) then
+    clear_ns(bufnr)
+    return
+  end
   local cmd = require("nvim-m1.install").resolve("m1-lint")
   if not cmd then
     return
   end
-  local path = vim.api.nvim_buf_get_name(bufnr)
-  local source = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-    .. "\n"
+  local run = capture(bufnr)
   local args = { cmd, "--format", "json" }
-  if path ~= "" then
+  if run.path ~= "" then
     table.insert(args, "--stdin-filename")
-    table.insert(args, path)
+    table.insert(args, run.path)
   end
   table.insert(args, "-")
-  vim.system(
+  local ok, error = pcall(
+    vim.system,
     args,
-    { text = true, stdin = source },
+    { text = true, stdin = run.source },
     vim.schedule_wrap(function(res)
-      if not vim.api.nvim_buf_is_valid(bufnr) then
+      local valid = current(run)
+      finish(run)
+      if not valid then
         return
       end
-      local items = M.parse(
-        (res.stdout or "") ~= "" and res.stdout or res.stderr or "",
-        path ~= "" and path or nil
-      )
+      local items =
+        M.parse(res.stdout or "", run.path ~= "" and run.path or nil, run.source)
       vim.diagnostic.set(NS, bufnr, items)
     end)
   )
+  if not ok then
+    finish(run)
+    vim.notify("m1-lint could not start: " .. tostring(error), vim.log.levels.WARN)
+  end
 end
 
 --- Whether m1-lsp is attached to `bufnr`. The server embeds m1-lint and already
@@ -216,7 +324,10 @@ end
 --- Lint a buffer with whichever backend is available.
 ---@param bufnr? integer
 function M.lint(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  bufnr = concrete_buffer(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
+    return
+  end
   -- Defer to m1-lsp when it is attached: it serves the same lint diagnostics, so
   -- running the standalone linter too would publish every warning twice. Also
   -- drop any diagnostics an EARLIER standalone run left behind — once the LSP is
@@ -228,10 +339,12 @@ function M.lint(bufnr)
   end
   local ok, nvim_lint = pcall(require, "lint")
   if ok then
-    nvim_lint.try_lint(
-      "m1_lint",
-      { cwd = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":h") }
-    )
+    vim.api.nvim_buf_call(bufnr, function()
+      nvim_lint.try_lint(
+        "m1_lint",
+        { cwd = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":h") }
+      )
+    end)
   else
     M.run_builtin(bufnr)
   end
@@ -243,8 +356,16 @@ function M.setup(cfg)
   local ok, nvim_lint = pcall(require, "lint")
   if ok then
     nvim_lint.linters = nvim_lint.linters or {}
-    nvim_lint.linters.m1_lint =
-      vim.tbl_deep_extend("force", M.linter(), nvim_lint.linters.m1_lint or {})
+    if nvim_lint.linters.m1_lint ~= registered_linter or not registered_linter then
+      local overrides = nvim_lint.linters.m1_lint
+      registered_linter = function()
+        local defaults = M.linter()
+        -- A user wrapper may call our earlier factory and capture its own run.
+        local custom = type(overrides) == "function" and overrides() or overrides
+        return vim.tbl_deep_extend("force", defaults, custom or {})
+      end
+      nvim_lint.linters.m1_lint = registered_linter
+    end
     nvim_lint.linters_by_ft = nvim_lint.linters_by_ft or {}
     if not nvim_lint.linters_by_ft.m1scr then
       nvim_lint.linters_by_ft.m1scr = { "m1_lint" }
@@ -254,6 +375,12 @@ function M.setup(cfg)
   -- Always (re)create the group so disabling clears a previously-wired hook.
   -- Manual linting (:M1Lint) works regardless of the save hook.
   local group = vim.api.nvim_create_augroup(GROUP, { clear = true })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = group,
+    callback = function(args)
+      runs[args.buf] = nil
+    end,
+  })
 
   -- Clear the standalone namespace the moment m1-lsp attaches: if the server was
   -- unresolvable when an .m1scr buffer was first read, the standalone runner
