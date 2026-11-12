@@ -18,10 +18,27 @@ end
 --- Exposed on `M` so other modules (e.g. init.lua's config scaffolder) share the
 --- one project-root discovery rule instead of re-implementing it inline.
 ---@return string?
-function M.project_file()
+function M.project_file(cfg)
+  if cfg and cfg._project_file ~= nil then
+    return cfg._project_file or nil
+  end
   local cur = vim.api.nvim_buf_get_name(0)
   local start = (cur ~= "" and vim.fs.dirname(cur)) or vim.fn.getcwd()
   return vim.fs.find({ "Project.m1prj" }, { path = start, upward = true })[1]
+end
+
+--- Capture a project for prompts and external pickers without changing config.
+--- An absent project stays absent even if the user switches buffers later.
+---@param cfg NvimM1Config
+---@param prj? string Absolute project filename; omit to capture the current project.
+---@return NvimM1Config
+function M.bind_project(cfg, prj)
+  if prj == nil and cfg._project_file ~= nil then
+    return cfg
+  end
+  local bound = vim.tbl_extend("force", {}, cfg)
+  bound._project_file = prj or M.project_file(cfg) or false
+  return bound
 end
 
 --- Tell the running m1-lsp client(s) the project file changed so they reload it,
@@ -156,7 +173,7 @@ local function run(cfg, args, ok_msg, opts)
     end
     return
   end
-  local prj = M.project_file()
+  local prj = M.project_file(cfg)
   if not prj then
     vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
     if opts.on_done then
@@ -184,7 +201,7 @@ end
 ---@return string[]
 local function list_rates(cfg)
   local bin = M.resolve_cmd(cfg)
-  local prj = M.project_file()
+  local prj = M.project_file(cfg)
   if not bin or not prj then
     return {}
   end
@@ -214,7 +231,7 @@ local DEFAULT_SECURITY = { "Tune", "Calibration", "Master Calibration", "Resourc
 ---@return string[]
 local function security_levels(cfg)
   local bin = M.resolve_cmd(cfg)
-  local prj = M.project_file()
+  local prj = M.project_file(cfg)
   if not bin or not prj then
     return DEFAULT_SECURITY
   end
@@ -258,6 +275,7 @@ end
 ---@param cfg NvimM1Config
 ---@return string[]
 function M.rates(cfg)
+  cfg = M.bind_project(cfg)
   return list_rates(cfg)
 end
 
@@ -361,6 +379,7 @@ end
 
 --- :M1CreateChannel — prompt for name/type/unit/security, then create-channel.
 function M.create_channel(cfg)
+  cfg = M.bind_project(cfg)
   create_typed_component(cfg, {
     verb = "create-channel",
     name_prompt = "New channel (Root.Group.Name): ",
@@ -371,6 +390,7 @@ end
 --- :M1SetSecurity — prompt for component (unless given) + level.
 ---@param component? string  Pre-selected component (telescope action).
 function M.set_security(cfg, component)
+  cfg = M.bind_project(cfg)
   with_component(component, function(comp)
     vim.ui.select(security_levels(cfg), { prompt = "Security" }, function(sec)
       if not sec then
@@ -388,6 +408,7 @@ end
 --- :M1SetType — prompt for component (unless given) + storage type (#46).
 ---@param component? string
 function M.set_type(cfg, component)
+  cfg = M.bind_project(cfg)
   with_component(component, function(comp)
     local types = vim.list_slice(TYPES, 2) -- no "(none)": set-type needs a value
     vim.ui.select(types, { prompt = "Storage type" }, function(ty)
@@ -406,6 +427,7 @@ end
 --- :M1SetUnit — prompt for component (unless given) + display unit (#46).
 ---@param component? string
 function M.set_unit(cfg, component)
+  cfg = M.bind_project(cfg)
   value_setter(cfg, component, {
     prompt = "Unit (e.g. rpm, kPa): ",
     verb = "set-unit",
@@ -426,7 +448,7 @@ end
 ---                 subprocess, non-zero exit, or unparseable output).
 local function component_entries(cfg)
   local bin = M.resolve_cmd(cfg)
-  local prj = M.project_file()
+  local prj = M.project_file(cfg)
   if not bin or not prj then
     return {}
   end
@@ -493,6 +515,7 @@ end
 
 --- :M1CreateGroup — prompt for the fully-qualified name, then create-group (#51).
 function M.create_group(cfg)
+  cfg = M.bind_project(cfg)
   vim.ui.input({ prompt = "New group (Root.Parent.Name): " }, function(name)
     if not name or name == "" then
       return
@@ -507,6 +530,7 @@ end
 ---@param cfg NvimM1Config
 ---@param on_done? fun(ok: boolean, err: string?)
 function M.create_constant(cfg, on_done)
+  cfg = M.bind_project(cfg)
   vim.ui.input({ prompt = "Constant name (Root.…): " }, function(name)
     if not name or name == "" then
       return
@@ -532,6 +556,7 @@ end
 ---@param cfg NvimM1Config
 ---@param on_done? fun(ok: boolean, err: string?)
 function M.create_table(cfg, on_done)
+  cfg = M.bind_project(cfg)
   vim.ui.input({ prompt = "Table name (Root.…): " }, function(name)
     if not name or name == "" then
       return
@@ -558,6 +583,7 @@ end
 --- :M1DeleteComponent — pick, confirm (destructive), then delete-component (#51).
 ---@param component? string  Pre-selected component (telescope action).
 function M.delete_component(cfg, component)
+  cfg = M.bind_project(cfg)
   pick_component(cfg, component, "Delete component", function(comp)
     local choice = vim.fn.confirm(
       "Delete " .. comp .. " from the project?",
@@ -580,6 +606,7 @@ end
 --- rename-component; echoes the CLI's backing-script-filename guidance (#51).
 ---@param component? string
 function M.rename_component(cfg, component)
+  cfg = M.bind_project(cfg)
   pick_component(cfg, component, "Rename component", function(comp)
     local leaf = comp:match("([^.]+)$") or comp
     vim.ui.input(
@@ -627,8 +654,9 @@ end
 --- into the quickfix list (error -> E, warning -> W, unknown -> I); opens it
 --- when non-empty (#51).
 function M.validate(cfg)
+  cfg = M.bind_project(cfg)
   local bin = M.resolve_cmd(cfg)
-  local prj = M.project_file()
+  local prj = M.project_file(cfg)
   if not bin then
     vim.notify("nvim-m1: m1-project not found", vim.log.levels.ERROR)
     return
@@ -693,6 +721,7 @@ end
 
 --- :M1SetCallRate — prompt for script + rate (from the project's clocks).
 function M.set_call_rate(cfg)
+  cfg = M.bind_project(cfg)
   vim.ui.input({ prompt = "Script (Root.…): " }, function(script)
     if not script or script == "" then
       return
@@ -725,6 +754,7 @@ end
 ---@param rate string|number  `"100"`, `"100Hz"`, or `"startup"` (any case).
 ---@param opts? { label?: string, on_done?: fun(ok: boolean, err?: string) }
 function M.set_call_rate_for(cfg, script, rate, opts)
+  cfg = M.bind_project(cfg)
   opts = opts or {}
   local raw = tostring(rate)
   local norm = raw:lower():match("startup") and "startup" or raw:gsub("[Hh]z$", "")
@@ -738,6 +768,7 @@ end
 
 --- :M1CreateParameter — prompt for name + type + unit + security (#61).
 function M.create_parameter(cfg)
+  cfg = M.bind_project(cfg)
   create_typed_component(cfg, {
     verb = "create-parameter",
     name_prompt = "Parameter name (Root.…): ",
@@ -762,16 +793,19 @@ local function create_function(cfg, scheduled)
 end
 
 function M.create_function(cfg)
+  cfg = M.bind_project(cfg)
   create_function(cfg, false)
 end
 
 function M.create_scheduled_function(cfg)
+  cfg = M.bind_project(cfg)
   create_function(cfg, true)
 end
 
 --- :M1SetQuantity — prompt for component (unless given) + physical quantity (#61).
 ---@param component? string
 function M.set_quantity(cfg, component)
+  cfg = M.bind_project(cfg)
   value_setter(cfg, component, {
     prompt = "Quantity (e.g. Angular Speed): ",
     verb = "set-quantity",
@@ -785,6 +819,7 @@ end
 --- :M1SetValidation — MinMax bounds or None; the in-editor remedy for T043 (#61).
 ---@param component? string
 function M.set_validation(cfg, component)
+  cfg = M.bind_project(cfg)
   with_component(component, function(comp)
     vim.ui.select({ "MinMax", "None" }, { prompt = "Validation" }, function(ty)
       if not ty then
@@ -813,6 +848,7 @@ end
 --- :M1SetFormat — display format string (#61).
 ---@param component? string
 function M.set_format(cfg, component)
+  cfg = M.bind_project(cfg)
   value_setter(cfg, component, {
     prompt = "Format (e.g. %.1f): ",
     verb = "set-format",
@@ -826,6 +862,7 @@ end
 --- :M1SetDps — display decimal places (#61).
 ---@param component? string
 function M.set_dps(cfg, component)
+  cfg = M.bind_project(cfg)
   value_setter(cfg, component, {
     prompt = "Decimal places: ",
     verb = "set-dps",
@@ -839,6 +876,7 @@ end
 --- :M1SetDisplayRange — display min/max (#61).
 ---@param component? string
 function M.set_display_range(cfg, component)
+  cfg = M.bind_project(cfg)
   with_component(component, function(comp)
     minmax_setter(cfg, comp, {
       verb = "set-display-range",
@@ -854,6 +892,7 @@ end
 --- :M1AddTag / :M1RemoveTag — the in-editor remedy for the T092 tags audit (#61).
 ---@param component? string
 function M.add_tag(cfg, component)
+  cfg = M.bind_project(cfg)
   value_setter(cfg, component, {
     prompt = "Tag (e.g. System/Type tag name): ",
     verb = "add-tag",
@@ -866,6 +905,7 @@ end
 
 ---@param component? string
 function M.remove_tag(cfg, component)
+  cfg = M.bind_project(cfg)
   value_setter(cfg, component, {
     prompt = "Tag to remove: ",
     verb = "remove-tag",
@@ -890,6 +930,7 @@ end
 --- The server stays read-only: this writes nothing, just a scratch buffer.
 ---@param cfg NvimM1Config
 function M.security_matrix(cfg)
+  cfg = M.bind_project(cfg)
   if not M.resolve_cmd(cfg) then
     vim.notify(
       "nvim-m1: m1-project not found (set opts.project_path or install it on $PATH)",
@@ -897,7 +938,7 @@ function M.security_matrix(cfg)
     )
     return
   end
-  if not M.project_file() then
+  if not M.project_file(cfg) then
     vim.notify("nvim-m1: no Project.m1prj found above the buffer", vim.log.levels.ERROR)
     return
   end

@@ -128,6 +128,12 @@ updates then pick up the released plugin and its bundled tool pins.
 | `:M1RestartServer` | Restart the `m1-lsp` server (use after `:M1Update` to cycle a stale process). |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
 
+Project commands retain the project selected when the command starts, including
+while prompts are open. Plugin integrations can use
+`require("nvim-m1.project").bind_project(cfg, absolute_project_file)` to obtain a
+config bound to a specific project without changing the shared config. Pass that
+config to project queries and editors; `project_file(cfg)` returns its target.
+
 The project-editing commands drive `Project.m1prj` through the
 [m1-project](https://github.com/nedlane/m1-project) binary (the same tool the
 VS Code extension uses) — the language server stays read-only and reloads
