@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        neovim: [stable, nightly]
+        neovim: [v0.10.4, stable, nightly]
     steps:
       - uses: actions/checkout@v7
 

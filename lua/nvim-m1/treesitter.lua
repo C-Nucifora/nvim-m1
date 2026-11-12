@@ -43,17 +43,18 @@ local function grammar_dir()
   return nil
 end
 
+--- Neovim 0.10 raises on failure and returns nil on success. Newer versions
+--- return true on success and may return nil when no parser is found.
+local function load_parser(path)
+  local ok, loaded = pcall(vim.treesitter.language.add, "m1", { path = path })
+  return ok and (loaded == true or vim.fn.has("nvim-0.11") == 0), loaded
+end
+
 --- Whether a compiled `m1` parser is loadable by Neovim.
----
---- `vim.treesitter.language.add` returns `true` on success and `nil` (it does
---- NOT raise, and does NOT return `false`) when the parser is missing, so the
---- result must come from its return value being exactly `true` — not from
---- pcall's success flag. The old `return pcall(...)` form reported the pcall
---- status and so was always true, masking a missing parser.
 ---@return boolean
 function M.parser_installed()
-  local ok, loaded = pcall(vim.treesitter.language.add, "m1")
-  return ok and loaded == true
+  local loaded = load_parser()
+  return loaded
 end
 
 --- Locate a C compiler on $PATH for building the m1 parser, preferring `cc`,
@@ -143,7 +144,7 @@ local function compile_parser(dir, fingerprint)
   -- Validate in a configless child before replacing the working binary.
   local validate = string.format(
     "local ok, loaded = pcall(vim.treesitter.language.add, 'm1', { path = %q }); "
-      .. "if not ok or loaded ~= true then "
+      .. "if not ok or (vim.fn.has('nvim-0.11') == 1 and loaded ~= true) then "
       .. "io.stderr:write(tostring(loaded or 'parser could not be loaded')); "
       .. "vim.cmd('cquit 1') end; vim.cmd('qa!')",
     temporary
@@ -172,8 +173,8 @@ local function compile_parser(dir, fingerprint)
 
   -- Load the freshly-built parser explicitly (the negative result of an earlier
   -- language.add in this session may otherwise be cached).
-  local ok, loaded = pcall(vim.treesitter.language.add, "m1", { path = out })
-  if ok and loaded == true then
+  local loaded, err = load_parser(out)
+  if loaded then
     -- Record success only after compilation and loading. Missing/old stamps
     -- deliberately trigger one rebuild when migrating an existing install.
     local wrote, write_result = pcall(vim.fn.writefile, { fingerprint }, stamp)
@@ -183,7 +184,7 @@ local function compile_parser(dir, fingerprint)
     end
     return true
   end
-  return false, "built the m1 parser but it failed to load: " .. tostring(loaded)
+  return false, "built the m1 parser but it failed to load: " .. tostring(err)
 end
 
 --- Register the queries from the grammar's `queries/*.scm` so highlighting,
@@ -250,8 +251,7 @@ function M.register(cfg)
     if not stale then
       -- Prefer the parser whose fingerprint we checked over an older legacy
       -- installer output that happens to appear earlier on the runtimepath.
-      local ok, result = pcall(vim.treesitter.language.add, "m1", { path = out })
-      loaded = ok and result == true
+      loaded = load_parser(out)
     end
     if stale or not loaded then
       local built, err = compile_parser(dir, fingerprint)
