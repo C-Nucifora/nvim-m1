@@ -76,6 +76,9 @@ describe("project identity across prompts", function()
     assert.equals(a, read("a"))
     assert.is_truthy(read("b"):find("kPa", 1, true))
     assert.is_nil(cfg._project_file)
-    assert.equals(dir .. "/a/Project.m1prj", project.project_file(cfg))
+    assert.equals(
+      vim.uv.fs_realpath(dir .. "/a/Project.m1prj"),
+      vim.uv.fs_realpath(project.project_file(cfg))
+    )
   end)
 end)
