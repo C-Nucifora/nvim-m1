@@ -68,6 +68,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: C-Nucifora/tree-sitter-m1
+          # Immutable ABI14 compatibility fixture from PR110, not a release pin.
+          # Released v0.8.1 is ABI15 and cannot load on Neovim 0.10.4.
+          ref: e04c8cfa78ac8c2a9b9354062d95bd13ac273650
           path: deps/tree-sitter-m1
 
       # The e2e specs run against the SAME pinned, provenance-verified
