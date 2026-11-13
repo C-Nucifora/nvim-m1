@@ -131,7 +131,8 @@ local judge_attestation -- forward declaration (defined below attest_verify)
 --- WARN that gh is absent so provenance cannot be checked (shared notify).
 ---@param repo string
 local function notify_no_gh(repo)
-  vim.notify(
+  pcall(
+    vim.notify,
     ("nvim-m1: gh CLI not found — skipping build-provenance verification of %s. "):format(
       repo
     )
@@ -206,7 +207,8 @@ function judge_attestation(code, out, path, repo)
     or lower:find("gh_token", 1, true)
 
   if no_attestation then
-    vim.notify(
+    pcall(
+      vim.notify,
       ("nvim-m1: no build-provenance attestation found for %s (%s) — the pinned "):format(
         repo,
         path
@@ -219,7 +221,8 @@ function judge_attestation(code, out, path, repo)
   end
 
   if needs_auth then
-    vim.notify(
+    pcall(
+      vim.notify,
       ("nvim-m1: gh is not authenticated — skipping build-provenance verification of %s. "):format(
         repo
       ) .. "Run `gh auth login` (or set GH_TOKEN) to verify downloaded binaries.",
@@ -271,6 +274,47 @@ local function resign(path)
   return true
 end
 
+-- The directory lock covers downloads, promotion and manifest updates across
+-- Neovim processes. Never steal a lock: a slow verifier may still own it.
+local owned_locks = {}
+local function acquire_lock()
+  vim.fn.mkdir(M.bin_dir(), "p")
+  local path = M.bin_dir() .. "/.install-lock"
+  local ok, err = vim.uv.fs_mkdir(path, 448) -- 0700, exclusive
+  if not ok then
+    return nil,
+      "cannot acquire install lock "
+        .. path
+        .. ": "
+        .. tostring(err)
+        .. ". Another install may be running. After confirming no install is active, remove this lock directory and retry."
+  end
+  local lock = { path = path }
+  owned_locks[lock] = true
+  function lock.release()
+    if not owned_locks[lock] then
+      return
+    end
+    owned_locks[lock] = nil
+    if lock.autocmd then
+      pcall(vim.api.nvim_del_autocmd, lock.autocmd)
+    end
+    os.remove(path .. "/owner")
+    vim.uv.fs_rmdir(path)
+  end
+  local wrote, result =
+    pcall(vim.fn.writefile, { "Neovim pid " .. vim.fn.getpid() }, path .. "/owner")
+  if not wrote or result ~= 0 then
+    lock.release()
+    return nil, "cannot record install lock owner at " .. path
+  end
+  lock.autocmd =
+    vim.api.nvim_create_autocmd("VimLeavePre", { once = true, callback = lock.release })
+  return lock
+end
+
+local write_manifest
+
 --- Download one tool's pinned release binary into `bin_dir()` asynchronously
 --- (re-signing it ad-hoc on macOS so it will run). The curl download and the
 --- `gh attestation verify` round-trip both run off the UI thread; `cb(ok, err?)`
@@ -278,7 +322,7 @@ end
 --- actual download.
 ---@param tool string
 ---@param cb fun(ok: boolean, err?: string)
-function M.fetch_async(tool, cb)
+function M.fetch_async(tool, cb, lock)
   local triple, suffix, err = M.platform()
   if not triple then
     return cb(false, err)
@@ -301,74 +345,136 @@ function M.fetch_async(tool, cb)
     asset
   )
   local dest = M.bin_dir() .. "/" .. tool .. suffix
-  -- Download to a sidecar path and only swap it into `dest` once it is fully
-  -- verified, executable and non-empty, so the LIVE binary is never at risk:
-  --   * a failed / truncated download can't corrupt or shrink it,
-  --   * a build-provenance failure removes the sidecar, never os.remove()s the
-  --     working binary out from under the running LSP,
-  --   * replacing a live server can't hit ETXTBSY — os.rename() swaps the inode
-  --     (the old one stays mapped for the running process) instead of
-  --     truncating the file curl was told to write in place.
-  -- The rename is atomic because the sidecar shares dest's directory (same fs).
-  local part = dest .. ".part"
-
-  --- Abort this fetch: drop the half-finished sidecar (never the live binary)
-  --- and report the error. Always leaves `dest` exactly as it was.
-  local function fail(msg)
-    os.remove(part)
-    return cb(false, msg)
+  local own_lock = lock == nil
+  if own_lock then
+    lock, err = acquire_lock()
+  elseif not owned_locks[lock] then
+    return cb(false, "install lock is no longer held")
+  end
+  if not lock then
+    return cb(false, err)
   end
 
-  vim.system(
-    { curl, "-fSL", "--retry", "2", "-o", part, url },
-    { text = true },
-    function(res)
-      if res.code ~= 0 then
-        return vim.schedule(function()
-          fail(
-            ("failed to download %s %s\n  %s\n  %s"):format(
-              tool,
-              version,
-              url,
-              res.stderr or ""
+  local fd, part = vim.uv.fs_mkstemp(M.bin_dir() .. "/.download-XXXXXX")
+  if not fd then
+    if own_lock then
+      lock.release()
+    end
+    return cb(false, "cannot create download staging file: " .. tostring(part))
+  end
+  vim.uv.fs_close(fd)
+  local finished = false
+  local function finish(ok, msg)
+    if finished then
+      return
+    end
+    finished = true
+    os.remove(part)
+    if own_lock then
+      lock.release()
+    end
+    return cb(ok, msg)
+  end
+  local function fail(msg)
+    return finish(false, msg)
+  end
+  local function guarded(callback)
+    local ok, failure = pcall(callback)
+    if not ok then
+      fail(tostring(failure))
+    end
+  end
+
+  guarded(function()
+    vim.system(
+      { curl, "-fSL", "--retry", "2", "-o", part, url },
+      { text = true },
+      function(res)
+        if res.code ~= 0 then
+          return vim.schedule(function()
+            fail(
+              ("failed to download %s %s\n  %s\n  %s"):format(
+                tool,
+                version,
+                url,
+                res.stderr or ""
+              )
             )
-          )
+          end)
+        end
+        vim.schedule(function()
+          guarded(function()
+            -- Verify build provenance on the sidecar BEFORE making it executable or
+            -- running it, so a tampered/substituted asset is rejected at rest and
+            -- never reaches the live path. (#21)
+            M.attest_verify_async(part, repo, function(vok, verr)
+              guarded(function()
+                if finished then
+                  return
+                end
+                if not vok then
+                  return fail(verr)
+                end
+                if suffix == "" then
+                  local changed, chmod_err = vim.uv.fs_chmod(part, 493)
+                  if not changed then
+                    return fail(
+                      "cannot make download executable: " .. tostring(chmod_err)
+                    )
+                  end
+                end
+                local rok, rerr = resign(part)
+                if not rok then
+                  return fail(rerr)
+                end
+                -- Guard against a 0-byte / unreadable artifact silently replacing a
+                -- good binary (curl can exit 0 having written nothing on some errors).
+                local st = vim.uv.fs_stat(part)
+                if not st or st.size == 0 then
+                  return fail(
+                    ("downloaded %s is empty — refusing to install"):format(tool)
+                  )
+                end
+                if not owned_locks[lock] then
+                  return fail("installation cancelled: install lock was released")
+                end
+                -- Invalidate first: a crash or failed recording after promotion
+                -- must never leave an old version attached to new bytes.
+                local manifest = M.installed_versions()
+                manifest[tool] = nil
+                local invalidated, invalidate_err = write_manifest(manifest, lock)
+                if not invalidated then
+                  return fail(
+                    "cannot invalidate installed version: " .. tostring(invalidate_err)
+                  )
+                end
+                local moved, rename_err = os.rename(part, dest)
+                if not moved then
+                  return fail(
+                    ("failed to install %s into place: %s"):format(
+                      tool,
+                      tostring(rename_err)
+                    )
+                  )
+                end
+                manifest[tool] = version
+                local recorded, manifest_err = write_manifest(manifest, lock)
+                if not recorded then
+                  return fail(
+                    "installed "
+                      .. tool
+                      .. " but could not record its version: "
+                      .. tostring(manifest_err)
+                  )
+                end
+                finish(true)
+              end)
+            end)
+          end)
         end)
       end
-      vim.schedule(function()
-        -- Verify build provenance on the sidecar BEFORE making it executable or
-        -- running it, so a tampered/substituted asset is rejected at rest and
-        -- never reaches the live path. (#21)
-        M.attest_verify_async(part, repo, function(vok, verr)
-          if not vok then
-            return fail(verr)
-          end
-          if suffix == "" then
-            vim.uv.fs_chmod(part, 493) -- 0755: the verified artifact may now run
-          end
-          local rok, rerr = resign(part)
-          if not rok then
-            return fail(rerr)
-          end
-          -- Guard against a 0-byte / unreadable artifact silently replacing a
-          -- good binary (curl can exit 0 having written nothing on some errors).
-          local st = vim.uv.fs_stat(part)
-          if not st or st.size == 0 then
-            return fail(("downloaded %s is empty — refusing to install"):format(tool))
-          end
-          -- Atomic swap into place: only now does the live binary change, and
-          -- only to the fully-verified artifact.
-          local moved, rename_err = os.rename(part, dest)
-          if not moved then
-            return fail(
-              ("failed to install %s into place: %s"):format(tool, tostring(rename_err))
-            )
-          end
-          cb(true)
-        end)
-      end)
-    end
-  )
+    )
+  end)
 end
 
 --- Path of the install manifest: a JSON `{ tool = version }` record of what
@@ -391,6 +497,11 @@ function M.installed_versions()
   f:close()
   local ok, data = pcall(vim.json.decode, content)
   if ok and type(data) == "table" then
+    for key, value in pairs(data) do
+      if type(key) ~= "string" or type(value) ~= "string" then
+        return {}
+      end
+    end
     return data
   end
   return {}
@@ -398,14 +509,26 @@ end
 
 --- Persist the install manifest.
 ---@param versions table<string, string>
-local function write_manifest(versions)
-  vim.fn.mkdir(M.bin_dir(), "p")
-  local f = io.open(M.manifest_path(), "w")
-  if not f then
-    return
+write_manifest = function(versions, lock)
+  if not owned_locks[lock] then
+    return false, "install lock was released"
   end
-  f:write(vim.json.encode(versions))
-  f:close()
+  local fd, path = vim.uv.fs_mkstemp(M.bin_dir() .. "/.manifest-XXXXXX")
+  if not fd then
+    return false, path
+  end
+  local data = vim.json.encode(versions)
+  local written, err = vim.uv.fs_write(fd, data, 0)
+  local closed, close_err = vim.uv.fs_close(fd)
+  if written ~= #data or not closed then
+    os.remove(path)
+    return false, err or close_err or "incomplete manifest write"
+  end
+  local moved, move_err = os.rename(path, M.manifest_path())
+  if not moved then
+    os.remove(path)
+  end
+  return moved, move_err
 end
 
 --- A bundled tool binary that is present on disk but unusable — a truncated /
@@ -489,34 +612,51 @@ function M.install_async(tools, on_done)
     return
   end
 
+  local lock, lock_err = acquire_lock()
+  if not lock then
+    pcall(vim.notify, "nvim-m1: " .. lock_err, vim.log.levels.ERROR)
+    if on_done then
+      on_done(false)
+    end
+    return
+  end
   M._in_flight = true
-  local manifest = M.installed_versions()
   local all_ok = true
   local i = 0
   local function step()
     i = i + 1
     local tool = tools[i]
     if not tool then
-      write_manifest(manifest)
       M._in_flight = false
+      lock.release()
       if all_ok then
-        vim.notify("nvim-m1: toolchain installed into " .. M.bin_dir())
+        pcall(vim.notify, "nvim-m1: toolchain installed into " .. M.bin_dir())
       end
       if on_done then
         on_done(all_ok)
       end
       return
     end
-    vim.notify(("nvim-m1: installing %s %s…"):format(tool, M.versions[tool]))
-    M.fetch_async(tool, function(ok, ferr)
-      if ok then
-        manifest[tool] = M.versions[tool] -- record only what landed on disk
-      else
+    pcall(
+      vim.notify,
+      ("nvim-m1: installing %s %s…"):format(tool, tostring(M.versions[tool]))
+    )
+    local completed = false
+    local function complete(ok, ferr)
+      if completed then
+        return
+      end
+      completed = true
+      if not ok then
         all_ok = false
-        vim.notify("nvim-m1: " .. tostring(ferr), vim.log.levels.ERROR)
+        pcall(vim.notify, "nvim-m1: " .. tostring(ferr), vim.log.levels.ERROR)
       end
       step()
-    end)
+    end
+    local started, failure = pcall(M.fetch_async, tool, complete, lock)
+    if not started then
+      complete(false, tostring(failure))
+    end
   end
   step()
 end

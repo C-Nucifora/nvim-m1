@@ -127,7 +127,7 @@ describe("nvim-m1.install", function()
   describe("install manifest + staleness (#26)", function()
     -- bin_dir() lives under XDG_DATA_HOME, which scripts/test.sh points at a
     -- throwaway temp dir — so writing/creating files here is hermetic.
-    local saved_fetch, saved_notify
+    local saved_fetch, saved_notify, saved_system, saved_attest, saved_resign
 
     local function fake_binary(tool)
       vim.fn.mkdir(install.bin_dir(), "p")
@@ -149,19 +149,43 @@ describe("nvim-m1.install", function()
     before_each(function()
       saved_fetch = install.fetch_async
       saved_notify = vim.notify
+      saved_system, saved_attest, saved_resign =
+        vim.system, install.attest_verify_async, install.needs_resign
       vim.notify = function() end
       vim.fn.delete(install.bin_dir(), "rf")
     end)
     after_each(function()
       install.fetch_async = saved_fetch
       vim.notify = saved_notify
+      vim.system, install.attest_verify_async, install.needs_resign =
+        saved_system, saved_attest, saved_resign
       vim.fn.delete(install.bin_dir(), "rf")
     end)
 
-    it("install() records the versions it installed in a manifest", function()
-      install.fetch_async = function(_, cb)
+    local function fixture_download(failed)
+      install.needs_resign = function()
+        return false
+      end
+      install.attest_verify_async = function(_, _, cb)
         cb(true)
-      end -- no network
+      end
+      vim.system = function(cmd, _, cb)
+        local path
+        for i, arg in ipairs(cmd) do
+          if arg == "-o" then
+            path = cmd[i + 1]
+          end
+        end
+        assert(path)
+        vim.fn.writefile({ "fixture" }, path)
+        local rejected = failed and cmd[#cmd]:find(failed, 1, true)
+        cb({ code = rejected and 1 or 0, stderr = "fixture download" })
+        return {}
+      end
+    end
+
+    it("install() records the versions it installed in a manifest", function()
+      fixture_download()
       install.install({ "m1-lint", "m1-project" })
       local v = install.installed_versions()
       assert.equals(install.versions["m1-lint"], v["m1-lint"])
@@ -169,9 +193,7 @@ describe("nvim-m1.install", function()
     end)
 
     it("install() does not record a tool whose download failed", function()
-      install.fetch_async = function(tool, cb)
-        cb(tool ~= "m1-lint", "boom")
-      end
+      fixture_download("m1-lint")
       install.install({ "m1-lint", "m1-project" })
       local v = install.installed_versions()
       assert.is_nil(v["m1-lint"])

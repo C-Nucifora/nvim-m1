@@ -87,6 +87,14 @@ use `settings = { format = { align_conditions = true } }` in the plugin setup,
 or set `align_conditions = true` under `[format]` in `m1-tools.toml`. The
 default is `false`; the same setting reaches the server at initialization.
 
+Installs use a lock in `stdpath("data")/nvim-m1/bin/.install-lock`, shared
+by all Neovim sessions using that data directory. Wait for the active install
+before retrying a rejected request. The lock is removed on completion and
+normal editor exit. A forced termination can leave it behind. Check the PID
+in its `owner` file and confirm no installation is running before removing
+that directory and retrying. Downloads and manifest updates use separate
+unique temporary files; an abandoned download is never reused.
+
 ### Bundled toolchain update proposals
 
 A daily workflow checks all four bundled tools for newer stable GitHub
@@ -119,6 +127,12 @@ updates then pick up the released plugin and its bundled tool pins.
 | `:M1Install` / `:M1Update` | Download the bundled toolchain at the pinned versions. |
 | `:M1RestartServer` | Restart the `m1-lsp` server (use after `:M1Update` to cycle a stale process). |
 | `:checkhealth nvim-m1` | Verify Neovim version, toolchain binaries, parser and integrations. |
+
+Project commands retain the project selected when the command starts, including
+while prompts are open. Plugin integrations can use
+`require("nvim-m1.project").bind_project(cfg, absolute_project_file)` to obtain a
+config bound to a specific project without changing the shared config. Pass that
+config to project queries and editors; `project_file(cfg)` returns its target.
 
 The project-editing commands drive `Project.m1prj` through the
 [m1-project](https://github.com/nedlane/m1-project) binary (the same tool the
